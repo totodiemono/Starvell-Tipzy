@@ -9,12 +9,9 @@ import html
 from pathlib import Path
 from datetime import datetime
 
-# Убеждаемся, что рабочая директория - это директория скрипта
 if getattr(sys, 'frozen', False):
-    # Если запущено как exe
     os.chdir(os.path.dirname(sys.executable))
 else:
-    # Если запущено как скрипт
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
     if script_dir not in sys.path:
@@ -24,7 +21,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile, LinkPreviewOptions
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile, LinkPreviewOptions, BotCommand
 
 from config import set_bot_token, get_bot_token_cached, DATA_FILE, AUTHORIZED_USERS_FILE, CONFIG_DIR, Colors
 from StarvellAPI.auth import fetch_homepage_data
@@ -116,7 +113,6 @@ async def get_latest_version_from_github() -> Optional[str]:
                         if resp.status != 200:
                             continue
                         text = await resp.text()
-                        # Пробуем извлечь версию через exec (как было)
                         try:
                             ns: Dict[str, Any] = {}
                             exec(text, ns)
@@ -126,7 +122,6 @@ async def get_latest_version_from_github() -> Optional[str]:
                         except Exception:
                             pass
                         
-                        # Дополнительно пробуем извлечь версию через регулярное выражение (fallback)
                         match = re.search(r"VERSION\s*=\s*['\"]([^'\"]+)['\"]", text)
                         if match:
                             return match.group(1).strip()
@@ -230,7 +225,6 @@ def set_session(session: str) -> None:
     cfg_set_session(session)
 
 def _load_data() -> dict:
-    """Загружает все данные из data.json"""
     if not DATA_FILE.exists():
         return {}
     try:
@@ -240,7 +234,6 @@ def _load_data() -> dict:
         return {}
 
 def _save_data(data: dict) -> None:
-    """Сохраняет все данные в data.json"""
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -357,7 +350,6 @@ MESSAGES_LOG_FILE = CONFIG_DIR / "messages_log.json"
 DATA_FILE = CONFIG_DIR / "data.json"
 
 def load_auto_reply_commands() -> dict:
-    # Автоответы теперь в settings.json
     settings = load_settings()
     return settings.get("auto_reply_commands", {"commands": {}})
 
@@ -391,7 +383,6 @@ def load_processed_orders() -> set:
     return set(processed_data.get("order_ids", []))
 
 def save_processed_orders(order_ids: set) -> None:
-    """Сохраняет список обработанных заказов"""
     data = _load_data()
     data["processed_orders"] = {"order_ids": list(order_ids)}
     _save_data(data)
@@ -491,10 +482,7 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🤖 Авто-ответ", callback_data="auto_reply")
             ],
             [InlineKeyboardButton(text="👋 Приветственное сообщение", callback_data="welcome")],
-            [
-                InlineKeyboardButton(text="🧩 Плагины", callback_data="plugins"),
-                InlineKeyboardButton(text="📝 Заготовки", callback_data="templates")
-            ]
+            [InlineKeyboardButton(text="📝 Заготовки", callback_data="templates")]
         ]
     )
     return keyboard
@@ -679,7 +667,6 @@ async def cmd_logs(message: Message):
 
 @dp.message(Command("restart"))
 async def cmd_restart(message: Message):
-    """Полный рестарт бота."""
     if not is_authorized(message.from_user.id):
         await message.answer("Сначала авторизуйтесь через /start")
         return
@@ -710,7 +697,6 @@ async def cmd_update(message: Message):
         await checking_msg.edit_text("⚠️ Не удалось получить информацию об обновлениях. Попробуйте позже.")
         return
     
-    # Сравниваем версии с учётом пробелов и переводов строк
     log_info(f"Локальная версия: {VERSION!r}")
     log_info(f"GitHub версия: {latest!r}")
     if isinstance(latest, str) and isinstance(VERSION, str):
@@ -955,8 +941,8 @@ async def handle_auto_reply(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "auto_reply_edit_commands")
 async def handle_auto_reply_edit_commands(callback: CallbackQuery):
-    callback.data = "ar_commands_list:0"
-    await handle_ar_commands_list(callback)
+    new_callback = callback.model_copy(update={'data': 'ar_commands_list:0'})
+    await handle_ar_commands_list(new_callback)
 
 @dp.callback_query(F.data.startswith("ar_commands_list:"))
 async def handle_ar_commands_list(callback: CallbackQuery):
@@ -1300,8 +1286,8 @@ async def handle_ar_delete_command(callback: CallbackQuery):
     save_auto_reply_commands(commands_data)
     
     await callback.answer("✅ Команда удалена")
-    callback.data = f"ar_commands_list:{offset}"
-    await handle_ar_commands_list(callback)
+    new_callback = callback.model_copy(update={'data': f'ar_commands_list:{offset}'})
+    await handle_ar_commands_list(new_callback)
 
 
 @dp.callback_query(F.data == "welcome")
@@ -1412,144 +1398,12 @@ async def process_welcome_message(message: Message, state: FSMContext):
     await state.clear()
 
 
-@dp.callback_query(F.data == "plugins")
-async def handle_plugins(callback: CallbackQuery):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-    await callback.answer()
-    
-    plugins = plugin_manager.get_all_plugins()
-    
-    if not plugins:
-        text = "🧩 Плагины\n\nПлагины не найдены."
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")]
-            ]
-        )
-    else:
-        text = "🧩 Плагины\n\nВыберите плагин для управления:"
-        keyboard_buttons = []
-        for uuid, plugin_data in plugins.items():
-            status = "🟢" if plugin_data.enabled else "🔴"
-            keyboard_buttons.append([
-                InlineKeyboardButton(
-                    text=f"{status} {plugin_data.name} v{plugin_data.version}",
-                    callback_data=f"plugin_{uuid}"
-                )
-            ])
-        keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")])
-        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard)
-    except Exception:
-        await callback.message.answer(text, reply_markup=keyboard)
-
-
-
-
-@dp.callback_query(F.data.startswith("plugin_") & ~F.data.startswith("plugin_commands_") & ~F.data.startswith("plugin_settings_"))
-async def handle_plugin_detail(callback: CallbackQuery):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-    
-    uuid = callback.data.replace("plugin_", "")
-    plugin_data = plugin_manager.get_plugin(uuid)
-    if not plugin_data:
-        await callback.answer("Плагин не найден", show_alert=True)
-        return
-    
-    status = "🟢 Активирован" if plugin_data.enabled else "🔴 Деактивирован"
-    text = f"""🧩 <b>{plugin_data.name}</b> v{plugin_data.version}
-
-{plugin_data.description}
-
-<b>Автор:</b> {plugin_data.credits}
-<b>UUID:</b> <code>{plugin_data.uuid}</code>
-<b>Статус:</b> {status}"""
-    
-    keyboard_buttons = [
-        [InlineKeyboardButton(
-            text="🔄 Включить" if not plugin_data.enabled else "🛑 Выключить",
-            callback_data=f"toggle_plugin_{uuid}"
-        )]
-    ]
-    
-    keyboard_buttons.append([
-        InlineKeyboardButton(text="⌨️ Команды", callback_data=f"plugin_commands_{uuid}")
-    ])
-    
-    if plugin_data.settings_page:
-        keyboard_buttons.append([
-            InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"plugin_settings_{uuid}")
-        ])
-    
-    keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="plugins")])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("toggle_plugin_"))
-async def handle_toggle_plugin(callback: CallbackQuery):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-    
-    uuid = callback.data.replace("toggle_plugin_", "")
-    
-    if plugin_manager.toggle_plugin(uuid):
-        await callback.answer("✅ Плагин переключен")
-        callback.data = f"plugin_{uuid}"
-        await handle_plugin_detail(callback)
-    else:
-        await callback.answer("❌ Ошибка", show_alert=True)
-
-@dp.callback_query(F.data.startswith("plugin_commands_"))
-async def handle_plugin_commands(callback: CallbackQuery):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-    
-    uuid = callback.data.replace("plugin_commands_", "")
-    plugin_data = plugin_manager.get_plugin(uuid)
-    if not plugin_data:
-        await callback.answer("Плагин не найден", show_alert=True)
-        return
-    
-    await callback.answer()
-    
-    if not plugin_data.commands:
-        text = f"<b>Команды плагина <i>{plugin_data.name}</i>.</b>\n\n❌ У плагина нет команд."
-    else:
-        commands_text_list = []
-        for cmd, desc in plugin_data.commands.items():
-            commands_text_list.append(f"/{cmd} - {desc}")
-        
-        commands_text = "\n\n".join(commands_text_list)
-        text = f"<b>Команды плагина <i>{plugin_data.name}</i>.</b>\n\n{commands_text}"
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀ Назад", callback_data=f"plugin_{uuid}")]
-    ])
-    
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 @dp.callback_query(F.data == "templates")
 async def handle_templates(callback: CallbackQuery):
-    callback.data = "templates_list:0"
-    await handle_templates_list(callback)
+    new_callback = callback.model_copy(update={'data': 'templates_list:0'})
+    await handle_templates_list(new_callback)
 
 @dp.callback_query(F.data.startswith("templates_list:"))
 async def handle_templates_list(callback: CallbackQuery):
@@ -1717,8 +1571,8 @@ async def handle_delete_template(callback: CallbackQuery):
     
     if delete_template(template_index):
         await callback.answer("✅ Заготовка удалена")
-        callback.data = f"templates_list:{offset}"
-        await handle_templates_list(callback)
+        new_callback = callback.model_copy(update={'data': f'templates_list:{offset}'})
+        await handle_templates_list(new_callback)
     else:
         await callback.answer("❌ Ошибка при удалении", show_alert=True)
 
@@ -1804,7 +1658,6 @@ async def handle_templates_for_chat(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("reply_order_"))
 async def handle_reply_order(callback: CallbackQuery, state: FSMContext):
-    """Обработчик кнопки 'Ответить' для заказа"""
     if not is_authorized(callback.from_user.id):
         await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
         return
@@ -1813,7 +1666,6 @@ async def handle_reply_order(callback: CallbackQuery, state: FSMContext):
     order_id = parts[2]
     buyer_id = parts[3] if len(parts) > 3 else None
     
-    # Находим chat_id по buyer_id
     chat_id = None
     if buyer_id:
         try:
@@ -1847,7 +1699,6 @@ async def handle_reply_order(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("templates_order_"))
 async def handle_templates_order(callback: CallbackQuery):
-    """Обработчик кнопки 'Заготовки' для заказа"""
     if not is_authorized(callback.from_user.id):
         await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
         return
@@ -1858,7 +1709,6 @@ async def handle_templates_order(callback: CallbackQuery):
     order_id = parts[2]
     buyer_id = parts[3] if len(parts) > 3 else None
     
-    # Находим chat_id по buyer_id
     chat_id = None
     if buyer_id:
         try:
@@ -1967,6 +1817,23 @@ async def check_new_messages():
         user_info = homepage_data.get("user", {}) if homepage_data.get("authorized") else {}
         starvell_user_id = user_info.get("id") if user_info else None
         
+        if not last_messages:
+            for chat in chats:
+                chat_id = str(chat.get("id", ""))
+                if not chat_id:
+                    continue
+                try:
+                    messages = await fetch_chat_messages(session, chat_id, limit=1)
+                    if messages and messages[0]:
+                        message_id = str(messages[0].get("id", ""))
+                        if message_id:
+                            last_messages[chat_id] = message_id
+                except Exception:
+                    pass
+            if last_messages:
+                save_last_messages(last_messages)
+            return
+        
         for chat in chats:
             chat_id = str(chat.get("id", ""))
             if not chat_id:
@@ -1985,7 +1852,6 @@ async def check_new_messages():
                 last_seen_id = last_messages.get(chat_id, "")
                 
                 if message_id and message_id != last_seen_id:
-                    # ПЕРВАЯ проверка: является ли это сообщение, отправленное ботом
                     if await is_bot_message(chat_id, message_id):
                         last_messages[chat_id] = message_id
                         continue
@@ -1993,7 +1859,6 @@ async def check_new_messages():
                     content = last_message.get("content", "")
                     created_at = last_message.get("createdAt", "")
                     
-                    # Получаем sender_id из разных возможных полей
                     sender_id = (
                         last_message.get("senderId") or 
                         last_message.get("authorId") or
@@ -2002,37 +1867,29 @@ async def check_new_messages():
                         ""
                     )
                     
-                    # Определяем, является ли отправитель владельцем аккаунта (проверяем ДО обработки)
                     is_outgoing = False
                     
-                    # Проверка 1: По sender_id
                     if starvell_user_id:
-                        # Проверяем несколько вариантов сравнения ID
                         sender_id_str = str(sender_id) if sender_id else ""
                         starvell_id_str = str(starvell_user_id)
                         if sender_id_str == starvell_id_str or sender_id_str == starvell_id_str.strip():
                             is_outgoing = True
                     
-                    # Проверка 2: По участникам чата (если sender_id не определен или не совпал)
                     if not is_outgoing and starvell_user_id:
                         participants = chat.get("participants", [])
                         starvell_username = user_info.get("username", "") if user_info else ""
                         for participant in participants:
                             participant_id = participant.get("id")
                             participant_username = participant.get("username", "")
-                            # Если участник - это мы
                             if participant_id and str(participant_id) == str(starvell_user_id):
-                                # Если у сообщения нет sender_id или он совпадает с нашим ID
                                 if not sender_id or str(sender_id) == str(participant_id):
                                     is_outgoing = True
                                     break
-                            # Также проверяем по username
                             elif participant_username and starvell_username and participant_username.lower() == starvell_username.lower():
                                 if not sender_id:
                                     is_outgoing = True
                                     break
                     
-                    # Проверка 3: По содержимому сообщения (всегда проверяем, так как sender_id может быть неправильным)
                     if not is_outgoing:
                         content_lower = content.lower() if content else ""
                         bot_phrases = [
@@ -2056,25 +1913,20 @@ async def check_new_messages():
                             "после выставления геймпасса"
                         ]
                         if any(phrase in content_lower for phrase in bot_phrases):
-                            # Вероятно, это сообщение от бота
                             is_outgoing = True
                     
-                    # Если это исходящее сообщение от нас - пропускаем его
                     if is_outgoing:
                         last_messages[chat_id] = message_id
                         continue
                     
-                    # Проверяем, есть ли в сообщении медиа или другие данные
                     has_image = bool(last_message.get("imageUrl") or last_message.get("image") or last_message.get("attachments"))
                     has_media = has_image or bool(last_message.get("media") or last_message.get("file"))
                     
-                    # Пропускаем пустые сообщения без медиа
                     content_stripped = content.strip() if content else ""
                     if not content_stripped and not has_media:
                         last_messages[chat_id] = message_id
                         continue
                     
-                    # Формируем текст для отображения
                     display_content = content_stripped if content_stripped else ("[медиа]" if has_media else "[пустое сообщение]")
                     
                     participants = chat.get("participants", [])
@@ -2082,10 +1934,8 @@ async def check_new_messages():
                     starvell_username = user_info.get("username", "Неизвестно") if user_info else "Неизвестно"
                     
                     if is_outgoing:
-                        # Это исходящее сообщение от нас
                         sender_name = starvell_username
                     else:
-                        # Это входящее сообщение от покупателя
                         if participants:
                             for participant in participants:
                                 participant_id = participant.get("id")
@@ -2109,43 +1959,20 @@ async def check_new_messages():
                     
                     from config import log_info
                     if is_outgoing:
-                        # Исходящее сообщение от нас
                         log_info(f"┌── 📤 Исходящее сообщение в чате {chat_name if chat_name else sender_name}")
                         log_info(f"└───> {sender_name}: {display_content}")
                     else:
-                        # Входящее сообщение от покупателя
                         log_info(f"┌── 💬 Входящее сообщение в чате {sender_name}")
                         log_info(f"└───> {sender_name}: {display_content}")
                     
                     last_messages[chat_id] = message_id
                     new_messages_found = True
                     
-                    # Обрабатываем только входящие сообщения (не наши) и только если есть содержимое
                     if not is_outgoing and content_stripped:
                         try:
                             plugin_manager.run_handlers("BIND_TO_NEW_MESSAGE", chat_id, content, sender_id, created_at)
                         except Exception:
                             pass
-                        
-                        # Вызываем обработчики плагинов для сообщений (только для входящих, не от бота)
-                        if not is_outgoing:
-                            try:
-                                # Обработчик для robux плагина
-                                try:
-                                    from plugins.robux import handle_new_message as robux_handle_new_message
-                                    robux_handle_new_message(chat_id, content, sender_id, created_at)
-                                except Exception:
-                                    pass
-                                
-                                # Обработчик для autostars плагина
-                                try:
-                                    from plugins.autostars import handle_new_message as autostars_handle_new_message
-                                    autostars_handle_new_message(chat_id, content, sender_id, created_at)
-                                except Exception as e:
-                                    from config import log_error
-                                    log_error(f"Ошибка вызова обработчика autostars для сообщения: {e}")
-                            except Exception:
-                                pass
                         
                         if get_setting("notifications", "new_message", True):
                             authorized_users = load_authorized_users()
@@ -2206,7 +2033,6 @@ async def check_new_messages():
                                 except Exception:
                                     pass
                     
-                    # Отправляем welcome сообщение только для входящих сообщений
                     if not is_outgoing:
                         welcome_enabled = get_setting("welcome_message", "enabled", False)
                         if welcome_enabled:
@@ -2244,7 +2070,6 @@ async def messages_checker():
 
 
 async def send_new_order_notification(user_id: int, order_data: dict):
-    """Отправляет уведомление о новом заказе пользователю"""
     try:
         offer = order_data.get("offerDetails", {})
         lot_title = offer.get("title") or offer.get("name") or "Неизвестный лот"
@@ -2252,19 +2077,16 @@ async def send_new_order_notification(user_id: int, order_data: dict):
         user = order_data.get("user", {})
         buyer_username = user.get("username", "Неизвестно")
         
-        # Сумма приходит в копейках, конвертируем в рубли
         total_price_raw = order_data.get("totalPrice") or order_data.get("basePrice", 0)
         total_price = float(total_price_raw) / 100.0 if total_price_raw else 0.0
         order_id = order_data.get("id", "")
         
-        # Парсим ID заказа в короткий формат #893AD268
         short_order_id = order_id.replace("-", "").upper()
         if len(short_order_id) >= 8:
             short_order_id = f"#{short_order_id[-8:]}"
         else:
             short_order_id = f"#{short_order_id}"
         
-        # Формируем текст уведомления
         text = (
             f"💠 <b>Новый заказ: {lot_title}</b>\n\n"
             f"💜 Покупатель: {buyer_username}\n"
@@ -2272,10 +2094,8 @@ async def send_new_order_notification(user_id: int, order_data: dict):
             f"📃 ID: {short_order_id}"
         )
         
-        # Сохраняем buyer_id для использования в обработчиках
         buyer_id = user.get("id") or ""
         
-        # Создаем инлайн кнопки
         order_url = f"https://starvell.com/order/{order_id}"
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="Перейти", url=order_url)],
@@ -2292,7 +2112,6 @@ async def send_new_order_notification(user_id: int, order_data: dict):
 
 
 async def check_new_orders():
-    """Проверяет новые заказы и отправляет уведомления"""
     from StarvellAPI.orders import fetch_sells
     
     session = get_session()
@@ -2310,8 +2129,6 @@ async def check_new_orders():
         processed_orders = load_processed_orders()
         new_orders_found = False
 
-        # Если это первый запуск (нет сохранённых заказов), инициализируем список
-        # текущими заказами без отправки уведомлений, чтобы не спамить старыми
         if not processed_orders:
             initial_ids = set()
             for order in orders:
@@ -2336,24 +2153,14 @@ async def check_new_orders():
                 if not order_id or status not in ("CREATED",):
                     continue
                 
-                # Проверяем, не обрабатывали ли мы уже этот заказ
                 if order_id in processed_orders:
                     continue
                 
-                # Логируем новый заказ
                 offer = order.get("offerDetails", {})
                 category = offer.get("category", {})
                 category_id = category.get("id") if isinstance(category, dict) else None
                 lot_title = None
-                # Пробуем извлечь название лота для Stars
-                if category_id == 182:
-                    try:
-                        from plugins.autostars import _extract_star_lot_info
-                        lot_title, _ = _extract_star_lot_info(order)
-                    except Exception:
-                        pass
                 
-                # Если не нашли через autostars, пробуем другие способы
                 if not lot_title or lot_title == "Лот без названия":
                     lot_title = offer.get("title") or offer.get("name") or ""
                     if not lot_title:
@@ -2363,7 +2170,6 @@ async def check_new_orders():
                     if not lot_title:
                         lot_title = offer.get("description", "")
                     if not lot_title:
-                        # Пробуем из orderArgs
                         order_args = order.get("orderArgs", [])
                         if isinstance(order_args, list):
                             for arg in order_args:
@@ -2378,12 +2184,10 @@ async def check_new_orders():
                         lot_title = "Лот без названия"
                 user = order.get("user", {})
                 buyer_username = user.get("username", "Неизвестно")
-                # Сумма приходит в копейках, конвертируем в рубли
                 total_price_raw = order.get("totalPrice") or order.get("basePrice", 0)
                 total_price = float(total_price_raw) / 100.0 if total_price_raw else 0.0
                 
                 from config import log_info
-                # Парсим ID заказа в короткий формат #893AD268
                 short_order_id = order_id.replace("-", "").upper()
                 if len(short_order_id) >= 8:
                     short_order_id = f"#{short_order_id[-8:]}"
@@ -2391,7 +2195,6 @@ async def check_new_orders():
                     short_order_id = f"#{short_order_id}"
                 log_info(f"💠 Новый заказ {short_order_id} | Покупатель: {buyer_username} | Лот: {lot_title} | Сумма: {total_price:.2f} ₽")
                 
-                # Отправляем уведомления авторизованным пользователям
                 if get_setting("notifications", "new_order", True):
                     authorized_users = load_authorized_users()
                     for user_id in authorized_users:
@@ -2400,32 +2203,14 @@ async def check_new_orders():
                         except Exception:
                             pass
                 
-                # Вызываем обработчики плагинов
                 try:
-                    # Обработчик для robux плагина
-                    try:
-                        from plugins.robux import handle_new_order as robux_handle_new_order
-                        user = order.get("user", {})
-                        buyer_id = str(user.get("id", ""))
-                        chat_id = str(order.get("chatId", buyer_id))
-                        robux_handle_new_order(order_id, order, chat_id, buyer_id)
-                    except Exception:
-                        pass
-                    
-                    # Обработчик для autostars плагина
-                    try:
-                        from plugins.autostars import handle_new_order as autostars_handle_new_order
-                        user = order.get("user", {})
-                        buyer_id = str(user.get("id", ""))
-                        chat_id = str(order.get("chatId", buyer_id))
-                        autostars_handle_new_order(order_id, order, chat_id, buyer_id)
-                    except Exception as e:
-                        from config import log_error
-                        log_error(f"Ошибка вызова обработчика autostars: {e}")
+                    user = order.get("user", {})
+                    buyer_id = str(user.get("id", ""))
+                    chat_id = str(order.get("chatId", buyer_id))
+                    plugin_manager.run_handlers("BIND_TO_NEW_ORDER", order_id, order, chat_id, buyer_id)
                 except Exception:
                     pass
                 
-                # Добавляем заказ в список обработанных
                 processed_orders.add(order_id)
                 new_orders_found = True
                 
@@ -2440,7 +2225,6 @@ async def check_new_orders():
 
 
 async def orders_checker():
-    """Периодическая проверка новых заказов"""
     while True:
         try:
             await check_new_orders()
@@ -2548,7 +2332,8 @@ async def auto_bump_loop():
                             log_info(f"✅ Автоподнятие: поднято {len(category_ids)} категорий для игры {game_id}")
                         else:
                             from config import log_warning
-                            log_warning(f"⚠️ Автоподнятие: ошибка для игры {game_id}")
+                            error_msg = result.get("response", {}).get("error", "Неизвестная ошибка")
+                            log_warning(f"⚠️ Автоподнятие: ошибка для игры {game_id}: {error_msg}")
                     except Exception as e:
                         from config import log_error
                         log_error(f"❌ Ошибка автоподнятия для игры {game_id}: {str(e)}")
@@ -2695,6 +2480,28 @@ async def init_starvell_account(init_message_ids: dict):
         write_log(f"Ошибка инициализации Starvell: {str(e)}")
 
 
+async def setup_bot_info(bot_token: str, starvell_username: str) -> None:
+    temp_bot = None
+    try:
+        temp_bot = Bot(token=bot_token)
+        bot_name = f"Tipzy Starvell | {starvell_username}"
+        await temp_bot.set_my_name(bot_name)
+        bot_description = """🛠️ https://github.com/totodiemono/Starvell-Tipzy 
+👨‍💻 @totodiemono 
+🧩 https://t.me/+qeS_88mIElE2YmFi"""
+        await temp_bot.set_my_description(bot_description)
+    except Exception:
+        pass
+    finally:
+        if temp_bot:
+            try:
+                session = getattr(temp_bot, 'session', None)
+                if session:
+                    await session.close()
+            except Exception:
+                pass
+
+
 async def main():
     global bot
     
@@ -2709,11 +2516,9 @@ async def main():
 
     latest_version = await get_latest_version_from_github()
     
-    # Если версия не получена, пропускаем проверку
     if not latest_version:
         log_info("Не удалось получить версию с GitHub. Проверка обновлений пропущена.")
     else:
-        # Нормализуем версии для корректного сравнения
         if isinstance(latest_version, str) and isinstance(VERSION, str):
             _v_local = VERSION.strip()
             _v_remote = latest_version.strip()
@@ -2723,7 +2528,6 @@ async def main():
             else:
                 log_info(f"{Colors.BLUE}Найдено обновление {latest_version}. для установки напишите /update.{Colors.RESET}")
         else:
-            # Если версия не строка, считаем что обновлений нет
             log_info("Обновлений не найдено (неверный формат версии).")
     
     token = get_bot_token_cached()
@@ -2756,10 +2560,13 @@ async def main():
                 username = user_info.get("username", "Неизвестно")
                 log_info(f"Авторизация успешна: {username}")
                 write_log(f"Session Starvell установлен для пользователя: {username}")
+                
+                await setup_bot_info(token, username)
             else:
                 log_error("Авторизация не удалась. Проверьте правильность session куки.")
                 return
         except Exception as e:
+            from config import log_error
             log_error(f"Ошибка при проверке авторизации: {str(e)}")
             write_log(f"Ошибка при проверке авторизации: {str(e)}")
             return
@@ -2770,9 +2577,15 @@ async def main():
     plugin_manager.load_plugins()
     plugin_manager.add_handlers()
     
-    # Устанавливаем bot_info до инициализации плагинов, чтобы они могли получить TG ID
     global bot_info
     bot_info = await bot.get_me()
+    
+    bot_commands = [
+        BotCommand(command="start", description="Старт"),
+        BotCommand(command="update", description="Проверка обновлений"),
+        BotCommand(command="restart", description="Рестарт"),
+        BotCommand(command="logs", description="Логи")
+    ]
     
     for uuid, plugin_data in plugin_manager.get_all_plugins().items():
         plugin_module = plugin_data.plugin
@@ -2790,6 +2603,16 @@ async def main():
             router = plugin_module.router
             if router:
                 dp.include_router(router)
+        
+        if plugin_data.commands:
+            for cmd, desc in plugin_data.commands.items():
+                bot_commands.append(BotCommand(command=cmd, description=desc))
+    
+    try:
+        await bot.set_my_commands(bot_commands)
+    except Exception as e:
+        log_error(f"Ошибка регистрации команд: {e}")
+    
     log_info(f"Telegram бот @{bot_info.username} запущен.")
     write_log(f"Бот @{bot_info.username} запущен и готов к работе")
     
