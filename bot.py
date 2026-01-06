@@ -8,6 +8,17 @@ import time
 import html
 from pathlib import Path
 from datetime import datetime
+
+# Убеждаемся, что рабочая директория - это директория скрипта
+if getattr(sys, 'frozen', False):
+    # Если запущено как exe
+    os.chdir(os.path.dirname(sys.executable))
+else:
+    # Если запущено как скрипт
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(script_dir)
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
