@@ -486,15 +486,18 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🔔 Уведомления", callback_data="notifications"),
                 InlineKeyboardButton(text="🤖 Авто-ответ", callback_data="auto_reply")
             ],
+            [
+                InlineKeyboardButton(text="🧩 Плагины", callback_data="plugins"),
+                InlineKeyboardButton(text="📝 Заготовки", callback_data="templates"),
+            ],
             [InlineKeyboardButton(text="👋 Приветственное сообщение", callback_data="welcome")],
-            [InlineKeyboardButton(text="📝 Заготовки", callback_data="templates")]
         ]
     )
     return keyboard
 
 
 async def show_main_menu(message: Message = None, callback: CallbackQuery = None):
-    text = "Выбери категорию настроек."
+    text = "✨ Меню управление ботом.\n👇 Воспользуйтесь кнопками ниже."
     keyboard = get_main_menu_keyboard()
     
     if callback:
@@ -504,115 +507,6 @@ async def show_main_menu(message: Message = None, callback: CallbackQuery = None
             await callback.message.answer(text, reply_markup=keyboard)
     elif message:
         await message.answer(text, reply_markup=keyboard)
-
-
-@dp.message(Command("autostars"))
-async def cmd_autostars(message: Message):
-    if not is_authorized(message.from_user.id):
-        await message.answer("Сначала авторизуйтесь через /start")
-        return
-    
-    try:
-        autostars_plugin = plugin_manager.get_plugin("4836374b-a886-43a2-a28d-8cb87bc11f49")
-        if not autostars_plugin:
-            await message.answer("❌ Плагин AutoStars не найден")
-            return
-        
-        plugin_module = autostars_plugin.plugin
-        
-        if hasattr(plugin_module, "_init_plugin_db"):
-            try:
-                await plugin_module._init_plugin_db()
-            except Exception:
-                pass
-        
-        if hasattr(plugin_module, "_settings_text") and hasattr(plugin_module, "_settings_kb") and hasattr(plugin_module, "_get_config"):
-            user_id = message.from_user.id
-            db_path = await plugin_module._db_path()
-            import aiosqlite
-            
-            async with aiosqlite.connect(db_path) as db:
-                await db.execute("PRAGMA foreign_keys = ON")
-                async with db.execute(
-                    "SELECT id FROM accounts WHERE user_id = ? AND is_active = 1 LIMIT 1",
-                    (user_id,)
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    if not row:
-                        session = get_session()
-                        if session:
-                            try:
-                                from StarvellAPI.auth import fetch_homepage_data
-                                homepage_data = await fetch_homepage_data(session)
-                                if homepage_data.get("authorized"):
-                                    user_info = homepage_data.get("user", {})
-                                    username = user_info.get("username", "Неизвестно")
-                                    
-                                    await db.execute(
-                                        "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
-                                        (user_id,)
-                                    )
-                                    
-                                    await db.execute(
-                                        """
-                                        INSERT INTO accounts (user_id, starvell_username, is_active)
-                                        VALUES (?, ?, 1)
-                                        """,
-                                        (user_id, username)
-                                    )
-                                    await db.commit()
-                                    
-                                    async with db.execute(
-                                        "SELECT id FROM accounts WHERE user_id = ? AND is_active = 1 LIMIT 1",
-                                        (user_id,)
-                                    ) as cursor2:
-                                        row = await cursor2.fetchone()
-                                        if not row:
-                                            await message.answer("❌ У вас нет активного аккаунта Starvell")
-                                            return
-                                        account_id = row[0]
-                                else:
-                                    await message.answer("❌ У вас нет активного аккаунта Starvell")
-                                    return
-                            except Exception as e:
-                                await message.answer(f"❌ Ошибка при создании аккаунта: {str(e)}")
-                                return
-                        else:
-                            await message.answer("❌ У вас нет активного аккаунта Starvell")
-                            return
-                    else:
-                        account_id = row[0]
-            
-            cfg = await plugin_module._get_config(user_id, account_id)
-            settings_text = await plugin_module._settings_text(cfg, user_id, account_id)
-            settings_kb = await plugin_module._settings_kb(cfg)
-            await message.answer(settings_text, reply_markup=settings_kb, parse_mode="HTML")
-        else:
-            await message.answer("❌ Плагин AutoStars не поддерживает команду")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка при открытии меню AutoStars: {str(e)}")
-
-@dp.message(Command("robux"))
-async def cmd_robux(message: Message):
-    if not is_authorized(message.from_user.id):
-        await message.answer("Сначала авторизуйтесь через /start")
-        return
-    
-    try:
-        robux_plugin = plugin_manager.get_plugin("f9d8c7b6-5e4a-4b2c-8a0d-9f8e7d6c5b4a")
-        if not robux_plugin:
-            await message.answer("❌ Плагин AutoRobux не найден")
-            return
-        
-        plugin_module = robux_plugin.plugin
-        if hasattr(plugin_module, "_about_text") and hasattr(plugin_module, "_settings_kb"):
-            about_text = plugin_module._about_text()
-            settings_kb = plugin_module._settings_kb()
-            await message.answer(about_text, reply_markup=settings_kb, parse_mode="HTML")
-        else:
-            await message.answer("❌ Плагин AutoRobux не поддерживает команду")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка при открытии меню AutoRobux: {str(e)}")
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
