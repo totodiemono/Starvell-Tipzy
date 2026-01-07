@@ -27,6 +27,7 @@
 4. Запустите start.bat
 
 Кодеры:
+
 <a href="https://github.com/totodiemono/Starvell-Tipzy/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=totodiemono/Starvell-Tipzy" />
 </a>
