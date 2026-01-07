@@ -2668,6 +2668,9 @@ async def main():
     
     asyncio.create_task(auto_bump_loop())
     
+    import announcements
+    asyncio.create_task(announcements.announcements_loop(bot))
+    
     await dp.start_polling(bot)
 
 
