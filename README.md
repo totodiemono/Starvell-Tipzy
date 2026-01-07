@@ -27,6 +27,7 @@
 4. Запустите start.bat
 
 🐧 Линукс (ubuntu/debian)
+
 Просто запустить скрипт в консоли:
 
 `wget https://raw.githubusercontent.com/mooonfrog/test/main/setup.sh -O install.sh && bash install.sh`
