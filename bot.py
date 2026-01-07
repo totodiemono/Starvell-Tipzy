@@ -621,8 +621,31 @@ async def cmd_start(message: Message, state: FSMContext):
     if is_authorized(user_id):
         await show_main_menu(message)
         return
+
+    text = (
+        "👋 Здраствуйте! Вы находитесь в боте Starvell-Tipzy.\n"
+        "Введите пароль от бота который вы задали в начале.\n\n"
+        "✨ Если вы забыли пароль - можете его изменить в конфиге.\n"
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"🖥️ Сделать такого же бота",
+                    url="https://github.com/totodiemono/Starvell-Tipzy"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"✈️ Телеграм бота",
+                    url="https://t.me/+qeS_88mIElE2YmFi"
+                )
+            ]
+        ]
+    )
     
-    await message.answer("Добро пожаловать в TipzyStarvell! Введите пароль для входа:")
+    await message.answer(text, reply_markup=keyboard)
     await state.set_state(SetupStates.checking_password)
 
 
@@ -764,6 +787,10 @@ async def handle_update_install(callback: CallbackQuery):
             f"✅ Обновление до версии {latest} установлено.\n\n"
             "Для применения изменений отправьте команду /restart."
         )
+
+        time.sleep(1)
+        import shutil
+        shutil.rmtree(base_dir / "помощь")
     except Exception as e:
         await callback.message.edit_text(
             f"⚠️ При установке обновления произошла ошибка: {e}\n"
