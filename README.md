@@ -26,6 +26,11 @@
 3. Запустите setup.bat, и дождитесь полной установки зависимостей 
 4. Запустите start.bat
 
+🐧 Линукс (ubuntu/debian)
+Просто запустить скрипт в консоли:
+`wget https://raw.githubusercontent.com/mooonfrog/test/main/setup.sh -O install.sh && bash install.sh`
+
+
 Кодеры:
 
 <a href="https://github.com/totodiemono/Starvell-Tipzy/graphs/contributors">
