@@ -943,6 +943,118 @@ async def toggle_notification_bot_start(callback: CallbackQuery):
     await handle_notifications(callback)
 
 
+@dp.callback_query(F.data == "plugins")
+async def handle_plugins(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    await callback.answer()
+    
+    plugins = plugin_manager.get_all_plugins()
+    
+    if not plugins:
+        text = "🧩 Плагины\n\nПлагины не найдены."
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")]]
+        )
+    else:
+        text = "🧩 Плагины\n\nВыберите плагин для управления:"
+        keyboard_buttons = []
+        
+        for uuid, plugin_data in sorted(plugins.items(), key=lambda x: x[1].name.lower()):
+            status = "🟢" if plugin_data.enabled else "🔴"
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text=f"{status} {plugin_data.name}",
+                    callback_data=f"plugin_info:{uuid}"
+                )
+            ])
+        
+        keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith("plugin_info:"))
+async def handle_plugin_info(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    uuid = callback.data.split(":")[1]
+    plugin_data = plugin_manager.get_plugin(uuid)
+    
+    if not plugin_data:
+        await callback.answer("Плагин не найден", show_alert=True)
+        return
+    
+    await callback.answer()
+    
+    status = "🟢 Включен" if plugin_data.enabled else "🔴 Выключен"
+    text = f"🧩 <b>{plugin_data.name}</b>\n\n"
+    text += f"<b>Версия:</b> {plugin_data.version}\n"
+    text += f"<b>Статус:</b> {status}\n"
+    text += f"<b>Описание:</b> {plugin_data.description}\n"
+    text += f"<b>Автор:</b> {plugin_data.credits}\n"
+    
+    keyboard_buttons = [
+        [InlineKeyboardButton(
+            text=f"{'🔴 Выключить' if plugin_data.enabled else '🟢 Включить'}",
+            callback_data=f"plugin_toggle:{uuid}"
+        )]
+    ]
+    
+    if plugin_data.settings_page:
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text="⚙️ Настройки",
+                callback_data=f"plugin_settings:{uuid}"
+            )
+        ])
+    
+    keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="plugins")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("plugin_toggle:"))
+async def handle_plugin_toggle(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    uuid = callback.data.split(":")[1]
+    success = plugin_manager.toggle_plugin(uuid)
+    
+    if not success:
+        await callback.answer("Ошибка при переключении плагина", show_alert=True)
+        return
+    
+    plugin_data = plugin_manager.get_plugin(uuid)
+    await callback.answer(f"{'Включен' if plugin_data.enabled else 'Выключен'}")
+    await handle_plugin_info(callback)
+
+@dp.callback_query(F.data.startswith("plugin_settings:"))
+async def handle_plugin_settings(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    uuid = callback.data.split(":")[1]
+    plugin_data = plugin_manager.get_plugin(uuid)
+    
+    if not plugin_data or not plugin_data.settings_page:
+        await callback.answer("Настройки недоступны", show_alert=True)
+        return
+    
+    await callback.answer("Настройки плагина должны быть реализованы в самом плагине")
+
 @dp.callback_query(F.data == "auto_reply")
 async def handle_auto_reply(callback: CallbackQuery, state: FSMContext):
     if not is_authorized(callback.from_user.id):
