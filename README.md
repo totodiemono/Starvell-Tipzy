@@ -30,7 +30,7 @@
 
 Просто запустить скрипт в консоли:
 
-`wget https://raw.githubusercontent.com/mooonfrog/test/main/setup.sh -O install.sh && bash install.sh`
+`wget https://raw.githubusercontent.com/totodiemono/Starvell-Tipzy/main/setup.sh -O install.sh && bash install.sh`
 
 
 Кодеры:
