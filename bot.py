@@ -284,53 +284,53 @@ def delete_template(index: int) -> bool:
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 
 def load_settings() -> dict:
-    if not SETTINGS_FILE.exists():
-        return {
-            "notifications": {
-                "new_order": True,
-                "new_message": True,
-                "bot_start": True
-            },
-            "auto_reply": {
-                "enabled": False,
-                "message": ""
-            },
-            "welcome_message": {
-                "enabled": False,
-                "message": ""
-            },
-            "global_switches": {
-                "auto_bump": False,
-                "logging": True,
-                "watermark_enabled": True,
-                "watermark": "[ 𝚂𝚝𝚊𝚛𝚟𝚎𝚕𝚕-𝚃𝚒𝚙𝚣𝚢 ]"
-            }
+    default_settings = {
+        "notifications": {
+            "new_order": True,
+            "new_message": True,
+            "bot_start": True
+        },
+        "auto_reply": {
+            "enabled": False,
+            "message": ""
+        },
+        "welcome_message": {
+            "enabled": False,
+            "message": ""
+        },
+        "global_switches": {
+            "auto_bump": False,
+            "logging": True,
+            "watermark_enabled": True,
+            "watermark": "[ 𝚂𝚝𝚊𝚛𝚟𝚎𝚕𝚕-𝚃𝚒𝚙𝚣𝚢 ]"
         }
+    }
+
+    if not SETTINGS_FILE.exists():
+        return default_settings
+
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            current_settings = json.load(f)
+        
+        changed = False
+        
+        for category, keys in default_settings.items():
+            if category not in current_settings:
+                current_settings[category] = keys
+                changed = True
+            elif isinstance(keys, dict):
+                for key, value in keys.items():
+                    if key not in current_settings[category]:
+                        current_settings[category][key] = value
+                        changed = True
+        
+        if changed:
+            save_settings(current_settings)
+            
+        return current_settings
     except (json.JSONDecodeError, IOError):
-        return {
-            "notifications": {
-                "new_order": True,
-                "new_message": True,
-                "bot_start": True
-            },
-            "auto_reply": {
-                "enabled": False,
-                "message": ""
-            },
-            "welcome_message": {
-                "enabled": False,
-                "message": ""
-            },
-            "global_switches": {
-                "auto_bump": False,
-                "logging": True,
-                "watermark_enabled": True,
-                "watermark": "[ 𝚂𝚝𝚊𝚛𝚟𝚎𝚕𝚕-𝚃𝚒𝚙𝚣𝚢 ]"
-            }
-        }
+        return default_settings
 
 def save_settings(settings: dict) -> None:
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -352,6 +352,21 @@ def get_setting(category: str, key: str, default: Any = None) -> Any:
 
 MESSAGES_LOG_FILE = CONFIG_DIR / "messages_log.json"
 DATA_FILE = CONFIG_DIR / "data.json"
+MODER_DETECT_FILE = CONFIG_DIR / "moder_detect.json"
+
+def load_detected_moders() -> set:
+    if not MODER_DETECT_FILE.exists():
+        return set()
+    try:
+        with open(MODER_DETECT_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return set(data.get("chats", []))
+    except (json.JSONDecodeError, IOError):
+        return set()
+
+def save_detected_moders(chats: set) -> None:
+    with open(MODER_DETECT_FILE, "w", encoding="utf-8") as f:
+        json.dump({"chats": list(chats)}, f, ensure_ascii=False, indent=2)
 
 def load_auto_reply_commands() -> dict:
     settings = load_settings()
@@ -943,118 +958,6 @@ async def toggle_notification_bot_start(callback: CallbackQuery):
     await handle_notifications(callback)
 
 
-@dp.callback_query(F.data == "plugins")
-async def handle_plugins(callback: CallbackQuery):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-    await callback.answer()
-    
-    plugins = plugin_manager.get_all_plugins()
-    
-    if not plugins:
-        text = "🧩 Плагины\n\nПлагины не найдены."
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")]]
-        )
-    else:
-        text = "🧩 Плагины\n\nВыберите плагин для управления:"
-        keyboard_buttons = []
-        
-        for uuid, plugin_data in sorted(plugins.items(), key=lambda x: x[1].name.lower()):
-            status = "🟢" if plugin_data.enabled else "🔴"
-            keyboard_buttons.append([
-                InlineKeyboardButton(
-                    text=f"{status} {plugin_data.name}",
-                    callback_data=f"plugin_info:{uuid}"
-                )
-            ])
-        
-        keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")])
-        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard)
-    except Exception:
-        await callback.message.answer(text, reply_markup=keyboard)
-
-@dp.callback_query(F.data.startswith("plugin_info:"))
-async def handle_plugin_info(callback: CallbackQuery):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-    
-    uuid = callback.data.split(":")[1]
-    plugin_data = plugin_manager.get_plugin(uuid)
-    
-    if not plugin_data:
-        await callback.answer("Плагин не найден", show_alert=True)
-        return
-    
-    await callback.answer()
-    
-    status = "🟢 Включен" if plugin_data.enabled else "🔴 Выключен"
-    text = f"🧩 <b>{plugin_data.name}</b>\n\n"
-    text += f"<b>Версия:</b> {plugin_data.version}\n"
-    text += f"<b>Статус:</b> {status}\n"
-    text += f"<b>Описание:</b> {plugin_data.description}\n"
-    text += f"<b>Автор:</b> {plugin_data.credits}\n"
-    
-    keyboard_buttons = [
-        [InlineKeyboardButton(
-            text=f"{'🔴 Выключить' if plugin_data.enabled else '🟢 Включить'}",
-            callback_data=f"plugin_toggle:{uuid}"
-        )]
-    ]
-    
-    if plugin_data.settings_page:
-        keyboard_buttons.append([
-            InlineKeyboardButton(
-                text="⚙️ Настройки",
-                callback_data=f"plugin_settings:{uuid}"
-            )
-        ])
-    
-    keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="plugins")])
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
-
-@dp.callback_query(F.data.startswith("plugin_toggle:"))
-async def handle_plugin_toggle(callback: CallbackQuery):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-    
-    uuid = callback.data.split(":")[1]
-    success = plugin_manager.toggle_plugin(uuid)
-    
-    if not success:
-        await callback.answer("Ошибка при переключении плагина", show_alert=True)
-        return
-    
-    plugin_data = plugin_manager.get_plugin(uuid)
-    await callback.answer(f"{'Включен' if plugin_data.enabled else 'Выключен'}")
-    await handle_plugin_info(callback)
-
-@dp.callback_query(F.data.startswith("plugin_settings:"))
-async def handle_plugin_settings(callback: CallbackQuery):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-    
-    uuid = callback.data.split(":")[1]
-    plugin_data = plugin_manager.get_plugin(uuid)
-    
-    if not plugin_data or not plugin_data.settings_page:
-        await callback.answer("Настройки недоступны", show_alert=True)
-        return
-    
-    await callback.answer("Настройки плагина должны быть реализованы в самом плагине")
-
 @dp.callback_query(F.data == "auto_reply")
 async def handle_auto_reply(callback: CallbackQuery, state: FSMContext):
     if not is_authorized(callback.from_user.id):
@@ -1467,6 +1370,7 @@ async def handle_welcome(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
+
 @dp.callback_query(F.data == "toggle_welcome_message")
 async def toggle_welcome_message(callback: CallbackQuery, state: FSMContext):
     if not is_authorized(callback.from_user.id):
@@ -1488,6 +1392,142 @@ async def edit_welcome_message(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Введите текст приветственного сообщения:")
     await state.set_state(SetupStates.setting_welcome_message)
 
+@dp.callback_query(F.data == "plugins")
+async def handle_plugins(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    await callback.answer()
+    
+    plugins = plugin_manager.get_all_plugins()
+    
+    if not plugins:
+        text = "🧩 Плагины\n\nПлагины не найдены."
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")]
+            ]
+        )
+    else:
+        text = "🧩 Плагины\n\nВыберите плагин для управления:"
+        keyboard_buttons = []
+        for uuid, plugin_data in plugins.items():
+            status = "🟢" if plugin_data.enabled else "🔴"
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text=f"{status} {plugin_data.name} v{plugin_data.version}",
+                    callback_data=f"plugin_{uuid}"
+                )
+            ])
+        keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard)
+
+
+@dp.callback_query(F.data.startswith("plugin_") & ~F.data.startswith("plugin_commands_") & ~F.data.startswith("plugin_settings_"))
+async def handle_plugin_detail(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    uuid = callback.data.replace("plugin_", "")
+    plugin_data = plugin_manager.get_plugin(uuid)
+    
+    if not plugin_data:
+        await callback.answer("Плагин не найден", show_alert=True)
+        return
+    
+    status = "🟢 Активирован" if plugin_data.enabled else "🔴 Деактивирован"
+    text = f"""🧩 <b>{plugin_data.name}</b> v{plugin_data.version}
+
+{plugin_data.description}
+
+<b>Автор:</b> {plugin_data.credits}
+<b>UUID:</b> <code>{plugin_data.uuid}</code>
+<b>Статус:</b> {status}"""
+    
+    keyboard_buttons = [
+        [InlineKeyboardButton(
+            text="🔄 Включить" if not plugin_data.enabled else "🛑 Выключить",
+            callback_data=f"toggle_plugin_{uuid}"
+        )]
+    ]
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="⌨️ Команды", callback_data=f"plugin_commands_{uuid}")
+    ])
+    
+    if plugin_data.settings_page:
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"plugin_settings_{uuid}")
+        ])
+    
+    keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="plugins")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("toggle_plugin_"))
+async def handle_toggle_plugin(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    uuid = callback.data.replace("toggle_plugin_", "")
+    
+    if plugin_manager.toggle_plugin(uuid):
+        await callback.answer("✅ Плагин переключен")
+        callback.data = f"plugin_{uuid}"
+        await handle_plugin_detail(callback)
+    else:
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@dp.callback_query(F.data.startswith("plugin_commands_"))
+async def handle_plugin_commands(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    uuid = callback.data.replace("plugin_commands_", "")
+    plugin_data = plugin_manager.get_plugin(uuid)
+    
+    if not plugin_data:
+        await callback.answer("Плагин не найден", show_alert=True)
+        return
+    
+    await callback.answer()
+    
+    if not plugin_data.commands:
+        text = f"<b>Команды плагина <i>{plugin_data.name}</i>.</b>\n\n❌ У плагина нет команд."
+    else:
+        commands_text_list = []
+        for cmd, desc in plugin_data.commands.items():
+            commands_text_list.append(f"/{cmd} - {desc}")
+        
+        commands_text = "\n\n".join(commands_text_list)
+        text = f"<b>Команды плагина <i>{plugin_data.name}</i>.</b>\n\n{commands_text}"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀ Назад", callback_data=f"plugin_{uuid}")]
+    ])
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 @dp.message(SetupStates.replying_to_chat)
 async def process_reply_to_chat(message: Message, state: FSMContext):
@@ -1761,6 +1801,27 @@ async def send_new_message_notification(user_id: int, chat_id: str, message_text
     except Exception:
         pass
 
+async def send_moder_notification(user_id: int, chat_id: str, moder_username: str, chat_title: str):
+    global bot
+    if not is_authorized(user_id) or not bot:
+        return
+
+    text = (
+        f"👮‍♂️ <b>ВНИМАНИЕ: МОДЕРАТОР В ЧАТЕ!</b>\n\n"
+        f"Обнаружено присутствие администрации.\n"
+        f"👤 <b>Модератор:</b> {html.escape(moder_username)}\n"
+        f"💬 <b>Чат:</b> {html.escape(chat_title)}\n\n"
+        f"⚠️ <i>Рекомендуется вести себя корректно и проверить переписку.</i>"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚨 Перейти в чат", url=f"https://starvell.com/chat/{chat_id}")]
+    ])
+
+    try:
+        await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        pass
 
 @dp.callback_query(F.data.startswith("reply_chat_"))
 async def handle_reply_chat(callback: CallbackQuery, state: FSMContext):
@@ -1937,6 +1998,8 @@ async def handle_send_template(callback: CallbackQuery):
 async def check_new_messages():
     from StarvellAPI.chats import fetch_chats
     from StarvellAPI.messages import fetch_chat_messages
+    from StarvellAPI.auth import fetch_homepage_data
+    from datetime import datetime
     
     session = get_session()
     if not session:
@@ -1948,9 +2011,11 @@ async def check_new_messages():
         chats = page_props.get("chats", [])
         
         last_messages = load_last_messages()
-        new_messages_found = False
+        detected_moders = load_detected_moders()
         
-        from StarvellAPI.auth import fetch_homepage_data
+        new_messages_found = False
+        moders_update_needed = False
+        
         homepage_data = await fetch_homepage_data(session)
         user_info = homepage_data.get("user", {}) if homepage_data.get("authorized") else {}
         starvell_user_id = user_info.get("id") if user_info else None
@@ -1970,13 +2035,50 @@ async def check_new_messages():
                     pass
             if last_messages:
                 save_last_messages(last_messages)
+            
             return
-        
+
         for chat in chats:
             chat_id = str(chat.get("id", ""))
             if not chat_id:
                 continue
             
+            if chat_id not in detected_moders:
+                participants = chat.get("participants", [])
+                moder_found = False
+                moder_name = "Неизвестный"
+                
+                for p in participants:
+                    p_id = str(p.get("id"))
+                    if starvell_user_id and p_id == str(starvell_user_id):
+                        continue
+
+                    roles = p.get("roles", [])
+                    is_suspicious = False
+                    
+                    for role in roles:
+                        role_str = str(role).upper()
+                        if any(x in role_str for x in ["MODERATOR"]):
+                            is_suspicious = True
+                            break
+                    
+                    if is_suspicious:
+                        moder_found = True
+                        moder_name = p.get("username", "Скрыт")
+                        break
+                
+                if moder_found:
+                    from config import log_warning
+                    chat_display_name = chat.get("name", chat.get("username", chat_id))
+                    log_warning(f"🚨 ОБНАРУЖЕН МОДЕРАТОР в чате {chat_display_name} (User: {moder_name})")
+                    
+                    authorized_users = load_authorized_users()
+                    for uid in authorized_users:
+                        await send_moder_notification(int(uid), chat_id, moder_name, chat_display_name)
+                    
+                    detected_moders.add(chat_id)
+                    moders_update_needed = True
+
             try:
                 messages = await fetch_chat_messages(session, chat_id, limit=10)
                 if not messages:
@@ -2031,24 +2133,13 @@ async def check_new_messages():
                     if not is_outgoing:
                         content_lower = content.lower() if content else ""
                         bot_phrases = [
-                            "спасибо за покупку",
-                            "напишите ваш telegram-тег",
-                            "пример: @username",
-                            "некорректный или несуществующий тег",
-                            "отправьте верный telegram-тег",
-                            "тег принят",
-                            "отправляю",
-                            "готово: отправлено",
-                            "не удалось отправить",
-                            "количество:",
-                            "подтверди отправку",
-                            "привет, это автоответчик",
-                            "напиши \"+\" или \"да\"",
-                            "напиши \"-\" или \"отмена\"",
-                            "подтверди отправку:",
-                            "пользователь найден",
-                            "установите цену на геймпассе",
-                            "после выставления геймпасса"
+                            "спасибо за покупку", "напишите ваш telegram-тег", "пример: @username",
+                            "некорректный или несуществующий тег", "отправьте верный telegram-тег",
+                            "тег принят", "отправляю", "готово: отправлено", "не удалось отправить",
+                            "количество:", "подтверди отправку", "привет, это автоответчик",
+                            "напиши \"+\" или \"да\"", "напиши \"-\" или \"отмена\"",
+                            "подтверди отправку:", "пользователь найден",
+                            "установите цену на геймпассе", "после выставления геймпасса"
                         ]
                         if any(phrase in content_lower for phrase in bot_phrases):
                             is_outgoing = True
@@ -2069,39 +2160,27 @@ async def check_new_messages():
                     
                     participants = chat.get("participants", [])
                     sender_name = "Unknown"
-                    starvell_username = user_info.get("username", "Неизвестно") if user_info else "Неизвестно"
                     
-                    if is_outgoing:
-                        sender_name = starvell_username
-                    else:
-                        if participants:
-                            for participant in participants:
-                                participant_id = participant.get("id")
-                                if starvell_user_id and str(participant_id) == str(starvell_user_id):
-                                    continue
-                                username_candidate = participant.get("username") or ""
-                                if username_candidate:
-                                    sender_name = username_candidate
-                                    break
-                            if sender_name == "Unknown" and participants:
-                                sender_name = participants[0].get("username") or participants[0].get("name", "Unknown")
+                    if participants:
+                        for participant in participants:
+                            participant_id = participant.get("id")
+                            if starvell_user_id and str(participant_id) == str(starvell_user_id):
+                                continue
+                            username_candidate = participant.get("username") or ""
+                            if username_candidate:
+                                sender_name = username_candidate
+                                break
+                        if sender_name == "Unknown" and participants:
+                            sender_name = participants[0].get("username") or participants[0].get("name", "Unknown")
                     
                     chat_name = chat.get("name", chat.get("username", ""))
                     if sender_name == "Unknown":
-                        if chat_name:
-                            sender_name = chat_name
-                        else:
-                            sender_name = "Unknown"
+                        sender_name = chat_name if chat_name else "Unknown"
                     
                     log_message(chat_id, message_id, content, str(sender_id), created_at)
-                    
                     from config import log_info
-                    if is_outgoing:
-                        log_info(f"┌── 📤 Исходящее сообщение в чате {chat_name if chat_name else sender_name}")
-                        log_info(f"└───> {sender_name}: {display_content}")
-                    else:
-                        log_info(f"┌── 💬 Входящее сообщение в чате {sender_name}")
-                        log_info(f"└───> {sender_name}: {display_content}")
+                    log_info(f"┌── 💬 Входящее сообщение в чате {sender_name}")
+                    log_info(f"└───> {sender_name}: {display_content}")
                     
                     last_messages[chat_id] = message_id
                     new_messages_found = True
@@ -2123,7 +2202,6 @@ async def check_new_messages():
                             command_data = commands_dict[command]
                             response_text = command_data.get("response", "")
                             if response_text:
-                                from datetime import datetime
                                 date_obj = datetime.now()
                                 date = date_obj.strftime("%d.%m.%Y")
                                 time_ = date_obj.strftime("%H:%M")
@@ -2133,34 +2211,22 @@ async def check_new_messages():
                                 str_date = f"{date_obj.day} {month_name}"
                                 str_full_date = str_date + f" {date_obj.year} года"
                                 
-                                response_text = response_text.replace("$full_date_text", str_full_date)
-                                response_text = response_text.replace("$date_text", str_date)
-                                response_text = response_text.replace("$date", date)
-                                response_text = response_text.replace("$time", time_)
-                                response_text = response_text.replace("$full_time", time_full)
-                                response_text = response_text.replace("$username", chat_name)
-                                response_text = response_text.replace("$message_text", content)
-                                response_text = response_text.replace("$chat_id", chat_id)
-                                response_text = response_text.replace("$chat_name", chat_name)
+                                response_text = response_text.replace("$full_date_text", str_full_date) \
+                                                             .replace("$date_text", str_date) \
+                                                             .replace("$date", date) \
+                                                             .replace("$time", time_) \
+                                                             .replace("$full_time", time_full) \
+                                                             .replace("$username", chat_name) \
+                                                             .replace("$message_text", content) \
+                                                             .replace("$chat_id", chat_id) \
+                                                             .replace("$chat_name", chat_name)
                                 
                                 try:
                                     from StarvellAPI.send_message import send_chat_message
-                                    result = await send_chat_message(session, chat_id, response_text, chat_name)
+                                    await send_chat_message(session, chat_id, response_text, chat_name)
                                     
                                     if command_data.get("telegramNotification", 0) == 1:
-                                        notification_text = command_data.get("notificationText", "")
-                                        if not notification_text:
-                                            notification_text = f"Пользователь {chat_name} ввел команду {command}."
-                                        else:
-                                            notification_text = notification_text.replace("$full_date_text", str_full_date)
-                                            notification_text = notification_text.replace("$date_text", str_date)
-                                            notification_text = notification_text.replace("$date", date)
-                                            notification_text = notification_text.replace("$time", time_)
-                                            notification_text = notification_text.replace("$full_time", time_full)
-                                            notification_text = notification_text.replace("$username", chat_name)
-                                            notification_text = notification_text.replace("$message_text", content)
-                                            notification_text = notification_text.replace("$chat_id", chat_id)
-                                            notification_text = notification_text.replace("$chat_name", chat_name)
+                                        notification_text = command_data.get("notificationText", "") or f"Пользователь {chat_name} ввел команду {command}."
                                         
                                         authorized_users = load_authorized_users()
                                         for user_id in authorized_users:
@@ -2170,29 +2236,53 @@ async def check_new_messages():
                                                 pass
                                 except Exception:
                                     pass
-                    
+
                     if not is_outgoing:
                         welcome_enabled = get_setting("welcome_message", "enabled", False)
                         if welcome_enabled:
                             try:
                                 welcome_msg = get_setting("welcome_message", "message", "")
                                 welcome_sent = load_welcome_sent()
-                                if welcome_msg and chat_id not in welcome_sent:
+                                
+                                if chat_id not in welcome_sent:
+                                    should_send_welcome = True
+
                                     try:
-                                        from StarvellAPI.send_message import send_chat_message
-                                        await send_chat_message(session, chat_id, welcome_msg, chat_name)
-                                        welcome_sent.add(chat_id)
-                                        save_welcome_sent(welcome_sent)
+                                        msg_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                                        if (datetime.now(msg_time.tzinfo) - msg_time).total_seconds() > 600:
+                                            should_send_welcome = False
                                     except Exception:
-                                        pass
+                                        pass 
+
+                                    if should_send_welcome and messages:
+                                        for prev_msg in messages:
+                                            prev_sender = (prev_msg.get("sender") or {}).get("id") or (prev_msg.get("author") or {}).get("id")
+                                            if str(prev_sender) == str(starvell_user_id):
+                                                should_send_welcome = False
+                                                welcome_sent.add(chat_id) 
+                                                save_welcome_sent(welcome_sent)
+                                                break
+                                    
+                                    if should_send_welcome:
+                                        try:
+                                            from StarvellAPI.send_message import send_chat_message
+                                            await send_chat_message(session, chat_id, welcome_msg, chat_name)
+                                            welcome_sent.add(chat_id)
+                                            save_welcome_sent(welcome_sent)
+                                            log_info(f"👋 Авто-приветствие отправлено для {chat_name}")
+                                        except Exception:
+                                            pass
                             except Exception:
                                 pass
-            
+
             except Exception as e:
                 continue
         
         if new_messages_found:
             save_last_messages(last_messages)
+            
+        if moders_update_needed:
+            save_detected_moders(detected_moders)
     
     except Exception as e:
         pass
@@ -2610,6 +2700,7 @@ async def init_starvell_account(init_message_ids: dict):
             log_info(f"🆔 {Colors.GREEN}Ваш ID:{Colors.RESET} {Colors.CYAN}{starvell_user_id}{Colors.RESET}.")
             log_info(f"💰 {Colors.GREEN}Баланс:{Colors.RESET} {Colors.CYAN}{balance_rub} RUB{Colors.RESET}.")
             log_info(f"🚀 {Colors.GREEN}Удачной торговли!{Colors.RESET}")
+            log_info("")
             
             write_log(f"Starvell аккаунт инициализирован: {username}, баланс: {balance_rub}")
         else:
