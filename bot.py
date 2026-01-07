@@ -301,7 +301,9 @@ def load_settings() -> dict:
             },
             "global_switches": {
                 "auto_bump": False,
-                "logging": True
+                "logging": True,
+                "watermark_enabled": True,
+                "watermark": "[ 𝚂𝚝𝚊𝚛𝚟𝚎𝚕𝚕-𝚃𝚒𝚙𝚣𝚢 ]"
             }
         }
     try:
@@ -324,7 +326,9 @@ def load_settings() -> dict:
             },
             "global_switches": {
                 "auto_bump": False,
-                "logging": True
+                "logging": True,
+                "watermark_enabled": True,
+                "watermark": "[ 𝚂𝚝𝚊𝚛𝚟𝚎𝚕𝚕-𝚃𝚒𝚙𝚣𝚢 ]"
             }
         }
 
@@ -463,6 +467,7 @@ class SetupStates(StatesGroup):
     adding_auto_reply_command = State()
     editing_auto_reply_command_response = State()
     editing_auto_reply_command_notification = State()
+    editing_watermark = State()
 
 
 def is_authorized(user_id: int) -> bool:
@@ -794,6 +799,12 @@ async def handle_global_switches(callback: CallbackQuery):
                     callback_data="toggle_logging"
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    text=f"🎟️ Ватермарк",
+                    callback_data="watermark_switcher"
+                )
+            ],
             [InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")]
         ]
     )
@@ -803,6 +814,99 @@ async def handle_global_switches(callback: CallbackQuery):
     except Exception:
         await callback.message.answer(text, reply_markup=keyboard)
 
+@dp.callback_query(F.data == "watermark_switcher")
+async def wm_switcher_mode(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    await callback.answer()
+
+    settings = get_settings()
+    global_switches = settings.get("global_switches", {})
+
+    watermark_text_text = global_switches.get("watermark", "[ Не указан ;/ ]")
+    watermark_enabled = global_switches.get("watermark_enabled", True)
+
+    text = (
+        f"🎟️ Вы можете изменить ватермарк тут.\n"
+        f"Ваш ватермарк: {watermark_text_text}\n\n"
+        f"👇 Воспользуйтесь кнопками ниже.\n"
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🖥️ Изменить",
+                    callback_data="edit_watermark"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"{'🟢' if watermark_enabled else '🔴'} Ватермарк",
+                    callback_data="toggle_watermark"
+                )
+            ],
+            [InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")]
+        ]
+    )
+
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard)
+
+@dp.callback_query(F.data == "edit_watermark")
+async def edit_watermark_function(callback: CallbackQuery, state: FSMContext):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+
+    settings = get_settings()
+    global_switches = settings.get("global_switches", {})
+
+    watermark_text_text = global_switches.get("watermark", "[ Не указан ;/ ]")
+
+    await callback.answer()
+    try:
+        await callback.message.edit_text(f"Введите новый ватермарк. Или вставьте старый ватермарк: {watermark_text_text}.\nВажно! Новый ватермарк не будет в обернут в скобки.")
+        await state.set_state(SetupStates.editing_watermark)
+    except Exception:
+        await callback.message.answer(f"Введите новый ватермарк. Или вставьте старый ватермарк: {watermark_text_text}.\nВажно! Новый ватермарк не будет в обернут в скобки.")
+        await state.set_state(SetupStates.editing_watermark)
+
+@dp.message(SetupStates.editing_watermark)
+async def editing_watermark(message: Message, state: FSMContext):
+    new_watermark = message.text.strip()
+    if not new_watermark:
+        await message.edit_text("Ватермарк не может быть пустым.")
+
+    update_setting("global_switches", "watermark", new_watermark)
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")]
+        ]
+    )
+
+    await message.answer(f"🎉 Ватермарк был изменен. Ваш новый ватермарк: {new_watermark}", reply_markup=keyboard)
+    await state.clear()
+
+@dp.callback_query(F.data == "toggle_watermark")
+async def toggle_watermark_function(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    settings = get_settings()
+    global_switches = settings.get("global_switches", {})
+    current = global_switches.get("watermark_enabled", False)
+    global_switches["watermark_enabled"] = not current
+    settings["global_switches"] = global_switches
+    save_settings(settings)
+
+    await callback.answer(f"{'Включено' if not current else 'Выключено'}")
+    await handle_global_switches(callback)
 
 @dp.callback_query(F.data == "toggle_auto_bump")
 async def handle_toggle_auto_bump(callback: CallbackQuery):
