@@ -706,6 +706,7 @@ async def cmd_restart(message: Message):
 
 @dp.message(Command("update"))
 async def cmd_update(message: Message):
+    from config import log_info
     if not is_authorized(message.from_user.id):
         await message.answer("Сначала авторизуйтесь через /start")
         return
