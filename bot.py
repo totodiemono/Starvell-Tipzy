@@ -1576,8 +1576,6 @@ async def process_welcome_message(message: Message, state: FSMContext):
     await state.clear()
 
 
-
-
 @dp.callback_query(F.data == "templates")
 async def handle_templates(callback: CallbackQuery):
     new_callback = callback.model_copy(update={'data': 'templates_list:0'})
@@ -2300,7 +2298,7 @@ async def messages_checker():
 async def send_new_order_notification(user_id: int, order_data: dict):
     try:
         offer = order_data.get("offerDetails", {})
-        lot_title = offer.get("title") or offer.get("name") or "Неизвестный лот"
+        lot_title = offer.get("descriptions", {}).get("rus", {}).get("briefDescription") or "Сегодня без названия к сожалению..."
         
         user = order_data.get("user", {})
         buyer_username = user.get("username", "Неизвестно")
