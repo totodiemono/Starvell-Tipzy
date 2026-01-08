@@ -79,7 +79,6 @@ wget https://raw.githubusercontent.com/mooonfrog/test/main/setup.sh -O install.s
 ## 🤝 Поддержка и ссылки
 
 * 📢 **Канал обновлений**: [Telegram Channel](https://t.me/+qeS_88mIElE2YmFi)
-* 🧩 **Магазин плагинов**: [@TipzyPlugin](https://t.me/+qeS_88mIElE2YmFi)
 * 💬 **Чат сообщества**: [Telegram Chat](https://t.me/+tUk3VYLlo20yZGZi)
 
 ---
