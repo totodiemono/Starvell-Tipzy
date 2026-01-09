@@ -483,6 +483,7 @@ class SetupStates(StatesGroup):
     editing_auto_reply_command_response = State()
     editing_auto_reply_command_notification = State()
     editing_watermark = State()
+    waiting_for_plugins = State()
 
 
 def is_authorized(user_id: int) -> bool:
@@ -1406,6 +1407,7 @@ async def handle_plugins(callback: CallbackQuery):
         text = "🧩 Плагины\n\nПлагины не найдены."
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
+                [InlineKeyboardButton(text="🧩 Добавить плагин", callback_data="add_plugin")]
                 [InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")]
             ]
         )
@@ -1421,6 +1423,7 @@ async def handle_plugins(callback: CallbackQuery):
                 )
             ])
         keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")])
+        keyboard_buttons.append([InlineKeyboardButton(text="🧩 Добавить плагин", callback_data="add_plugin")])
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
     try:
@@ -1428,6 +1431,49 @@ async def handle_plugins(callback: CallbackQuery):
     except Exception:
         await callback.message.answer(text, reply_markup=keyboard)
 
+@dp.callback_query(F.data == "add_plugin")
+async def add_plugin_from_file(callback: CallbackQuery, state: FSMContext):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+
+    text = "🧩 Скиньте сюда файл с расширением .py. Не рекомендуем закидывать не проверенные плагины и те которые слиты. Мало ли что в них."
+
+    try:
+        await callback.message.edit_text(text)
+        await state.set_state(SetupStates.waiting_for_plugins)
+    except Exception:
+        await callback.message.answer(text)
+        await state.set_state(SetupStates.waiting_for_plugins)
+
+@dp.message(SetupStates.waiting_for_plugins, F.document)
+async def save_plugin_file(message: Message, state: FSMContext, bot: Bot):
+    document = message.document
+    file_name = document.file_name
+
+    if not file_name.endswith(".py"):
+        await message.answer("❌ Это не Python файл. Пришлите файл с расширением .py")
+        return
+
+    folder_path = "plugins"
+    os.makedirs(folder_path, exist_ok=True)
+
+    destination = os.path.join(folder_path, file_name)
+
+    await bot.download(document, destination=destination)
+
+    text = f"✅ Файл `{file_name}` успешно сохранен в папку! Пропишите - /restart - чтобы сохранить изменения."
+
+    try:
+        await message.edit_text(text)
+        await state.clear()
+    except Exception:
+        await message.answer(text)
+        await state.clear()
+
+@dp.message(SetupStates.waiting_for_plugins)
+async def incorrect_content(message: Message):
+    await message.edit_text("Я жду именно **файл**. Пожалуйста, прикрепите файл.")
 
 @dp.callback_query(F.data.startswith("plugin_") & ~F.data.startswith("plugin_commands_") & ~F.data.startswith("plugin_settings_"))
 async def handle_plugin_detail(callback: CallbackQuery):
