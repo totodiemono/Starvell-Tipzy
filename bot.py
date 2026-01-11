@@ -284,53 +284,63 @@ def delete_template(index: int) -> bool:
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 
 def load_settings() -> dict:
-    default_settings = {
-        "notifications": {
-            "new_order": True,
-            "new_message": True,
-            "bot_start": True
-        },
-        "auto_reply": {
-            "enabled": False,
-            "message": ""
-        },
-        "welcome_message": {
-            "enabled": False,
-            "message": ""
-        },
-        "global_switches": {
-            "auto_bump": False,
-            "logging": True,
-            "watermark_enabled": True,
-            "watermark": "[ 𝚂𝚝𝚊𝚛𝚟𝚎𝚕𝚕-𝚃𝚒𝚙𝚣𝚢 ]"
-        }
-    }
-
     if not SETTINGS_FILE.exists():
-        return default_settings
-
+        return {
+            "notifications": {
+                "new_order": True,
+                "new_message": True,
+                "bot_start": True,
+                "new_review": True
+            },
+            "auto_reply": {
+                "enabled": False,
+                "message": ""
+            },
+            "welcome_message": {
+                "enabled": False,
+                "message": ""
+            },
+            "auto_review_reply": {
+                "enabled": False,
+                "message": "Спасибо за отзыв!"
+            },
+            "global_switches": {
+                "auto_bump": False,
+                "logging": True,
+                "watermark_enabled": True,
+                "watermark": "[ 𝚂𝚝𝚊𝚛𝚟𝚎𝚕𝚕-𝚃𝚒𝚙𝚣𝚢 ]"
+            }
+        }
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            current_settings = json.load(f)
-        
-        changed = False
-        
-        for category, keys in default_settings.items():
-            if category not in current_settings:
-                current_settings[category] = keys
-                changed = True
-            elif isinstance(keys, dict):
-                for key, value in keys.items():
-                    if key not in current_settings[category]:
-                        current_settings[category][key] = value
-                        changed = True
-        
-        if changed:
-            save_settings(current_settings)
-            
-        return current_settings
+            return json.load(f)
     except (json.JSONDecodeError, IOError):
-        return default_settings
+        return {
+            "notifications": {
+                "new_order": True,
+                "new_message": True,
+                "bot_start": True,
+                "new_review": True
+            },
+            "auto_reply": {
+                "enabled": False,
+                "message": ""
+            },
+            "welcome_message": {
+                "enabled": False,
+                "message": ""
+            },
+            "auto_review_reply": {
+                "enabled": False,
+                "message": "Спасибо за отзыв!"
+            },
+            "global_switches": {
+                "auto_bump": False,
+                "logging": True,
+                "watermark_enabled": True,
+                "watermark": "[ 𝚂𝚝𝚊𝚛𝚟𝚎𝚕𝚕-𝚃𝚒𝚙𝚣𝚢 ]"
+            }
+        }
 
 def save_settings(settings: dict) -> None:
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -352,21 +362,6 @@ def get_setting(category: str, key: str, default: Any = None) -> Any:
 
 MESSAGES_LOG_FILE = CONFIG_DIR / "messages_log.json"
 DATA_FILE = CONFIG_DIR / "data.json"
-MODER_DETECT_FILE = CONFIG_DIR / "moder_detect.json"
-
-def load_detected_moders() -> set:
-    if not MODER_DETECT_FILE.exists():
-        return set()
-    try:
-        with open(MODER_DETECT_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return set(data.get("chats", []))
-    except (json.JSONDecodeError, IOError):
-        return set()
-
-def save_detected_moders(chats: set) -> None:
-    with open(MODER_DETECT_FILE, "w", encoding="utf-8") as f:
-        json.dump({"chats": list(chats)}, f, ensure_ascii=False, indent=2)
 
 def load_auto_reply_commands() -> dict:
     settings = load_settings()
@@ -396,7 +391,6 @@ def save_last_messages(last_messages: dict) -> None:
     _save_data(data)
 
 def load_processed_orders() -> set:
-    """Загружает список обработанных заказов"""
     data = _load_data()
     processed_data = data.get("processed_orders", {})
     return set(processed_data.get("order_ids", []))
@@ -404,6 +398,16 @@ def load_processed_orders() -> set:
 def save_processed_orders(order_ids: set) -> None:
     data = _load_data()
     data["processed_orders"] = {"order_ids": list(order_ids)}
+    _save_data(data)
+
+def load_processed_reviews() -> set:
+    data = _load_data()
+    processed_data = data.get("processed_reviews", {})
+    return set(processed_data.get("review_ids", []))
+
+def save_processed_reviews(review_ids: set) -> None:
+    data = _load_data()
+    data["processed_reviews"] = {"review_ids": list(review_ids)}
     _save_data(data)
 
 def load_notification_messages() -> dict:
@@ -483,7 +487,6 @@ class SetupStates(StatesGroup):
     editing_auto_reply_command_response = State()
     editing_auto_reply_command_notification = State()
     editing_watermark = State()
-    waiting_for_plugins = State()
 
 
 def is_authorized(user_id: int) -> bool:
@@ -507,6 +510,7 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="📝 Заготовки", callback_data="templates"),
             ],
             [InlineKeyboardButton(text="👋 Приветственное сообщение", callback_data="welcome")],
+            [InlineKeyboardButton(text="⭐ Авто-ответ на отзыв", callback_data="auto_review_reply")],
         ]
     )
     return keyboard
@@ -602,6 +606,177 @@ async def cmd_logs(message: Message):
         write_log(f"Ошибка отправки логов: {str(e)}")
         await message.answer(f"❌ Ошибка при отправке логов: {str(e)}")
 
+
+def find_review_in_dict(data: dict, path: str = "") -> list:
+    """Рекурсивно ищет все упоминания 'review', 'rating', 'feedback' в словаре"""
+    results = []
+    if not isinstance(data, dict):
+        return results
+    
+    for key, value in data.items():
+        current_path = f"{path}.{key}" if path else key
+        key_lower = key.lower()
+        
+        if any(word in key_lower for word in ['review', 'rating', 'feedback', 'comment', 'stars']):
+            results.append({
+                "path": current_path,
+                "key": key,
+                "value": value
+            })
+        
+        if isinstance(value, dict):
+            results.extend(find_review_in_dict(value, current_path))
+        elif isinstance(value, list):
+            for i, item in enumerate(value):
+                if isinstance(item, dict):
+                    results.extend(find_review_in_dict(item, f"{current_path}[{i}]"))
+    
+    return results
+
+@dp.message(Command("test_review"))
+async def cmd_test_review(message: Message):
+    if not is_authorized(message.from_user.id):
+        await message.answer("Сначала авторизуйтесь через /start")
+        return
+    
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Использование: /test_review <order_id>\n\nПример: /test_review 019b9a49-8d22-54c9-2221-9b6c8d469596")
+        return
+    
+    order_id = args[1]
+    from config import get_session, log_info, log_error
+    
+    session = get_session()
+    if not session:
+        await message.answer("❌ Ошибка: нет сессии Starvell")
+        return
+    
+    try:
+        from StarvellAPI.reviews import get_order_review, extract_review_from_order_data
+        import json
+        
+        await message.answer(f"⏳ Получаю данные заказа {order_id}...")
+        
+        order_data = await get_order_review(session, order_id)
+        
+        review_info = extract_review_from_order_data(order_data)
+        
+        if review_info:
+            stars = review_info.get("stars", 0)
+            text = review_info.get("text", "")
+            author = review_info.get("author", "Неизвестно")
+            
+            short_order_id = order_id.replace("-", "").upper()
+            if len(short_order_id) >= 8:
+                short_order_id = f"#{short_order_id[-8:]}"
+            else:
+                short_order_id = f"#{short_order_id}"
+            
+            result_text = f"✅ <b>Отзыв найден!</b>\n\n"
+            result_text += f"📃 ID заказа: {short_order_id}\n"
+            result_text += f"⭐ Оценка: {'⭐' * stars} ({stars}/5)\n"
+            result_text += f"📝 Текст: {text if text else 'Без текста'}\n"
+            result_text += f"👤 Автор: {author}\n"
+            
+            await message.answer(result_text, parse_mode="HTML")
+        else:
+            await message.answer("❌ Отзыв не найден через функцию extract_review_from_order_data")
+            
+            found_reviews = find_review_in_dict(order_data)
+            if found_reviews:
+                review_text = "🔍 <b>Найдены упоминания отзывов в структуре:</b>\n\n"
+                for item in found_reviews[:10]:
+                    review_text += f"📍 <code>{item['path']}</code>\n"
+                    review_text += f"   Ключ: <code>{item['key']}</code>\n"
+                    val_str = json.dumps(item['value'], ensure_ascii=False, indent=2)
+                    if len(val_str) > 200:
+                        val_str = val_str[:200] + "..."
+                    review_text += f"   Значение: <code>{val_str}</code>\n\n"
+                await message.answer(review_text, parse_mode="HTML")
+            else:
+                await message.answer("❌ Не найдено упоминаний 'review', 'rating', 'feedback' в структуре данных")
+        
+        full_json = json.dumps(order_data, indent=2, ensure_ascii=False)
+        if len(full_json) > 4000:
+            await message.answer(f"📄 <b>Полный JSON (первые 4000 символов):</b>\n\n<code>{full_json[:4000]}</code>", parse_mode="HTML")
+            await message.answer(f"📄 <b>Продолжение (следующие 4000 символов):</b>\n\n<code>{full_json[4000:8000]}</code>", parse_mode="HTML")
+        else:
+            await message.answer(f"📄 <b>Полный JSON:</b>\n\n<code>{full_json}</code>", parse_mode="HTML")
+        
+    except Exception as e:
+        log_error(f"Ошибка при тестировании отзыва: {e}")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+@dp.message(Command("all_reviews"))
+async def cmd_all_reviews(message: Message):
+    if not is_authorized(message.from_user.id):
+        await message.answer("Сначала авторизуйтесь через /start")
+        return
+    
+    from config import get_session
+    from StarvellAPI.orders import fetch_sells
+    from StarvellAPI.reviews import get_order_review, extract_review_from_order_data
+    
+    session = get_session()
+    if not session:
+        await message.answer("❌ Ошибка: нет сессии Starvell")
+        return
+    
+    await message.answer("⏳ Загружаю отзывы...")
+    
+    try:
+        data = await fetch_sells(session)
+        page_props = data.get("pageProps", {})
+        orders = page_props.get("orders") or []
+        
+        reviews = []
+        for order in orders:
+            if not isinstance(order, dict):
+                continue
+            order_id = order.get("id")
+            if not order_id:
+                continue
+            try:
+                order_data = await get_order_review(session, order_id)
+                review_info = extract_review_from_order_data(order_data)
+                if review_info and isinstance(review_info.get("stars"), int) and review_info["stars"] >= 1:
+                    review_info["order_id"] = order_id
+                    reviews.append(review_info)
+            except Exception:
+                continue
+        
+        if not reviews:
+            await message.answer("📭 Отзывов не найдено")
+            return
+        
+        total_stars = sum(r.get("stars", 0) for r in reviews)
+        avg_rating = total_stars / len(reviews) if reviews else 0
+        
+        text = f"⭐ <b>Все отзывы ({len(reviews)})</b>\n"
+        text += f"📊 Средний рейтинг: {avg_rating:.1f}/5\n\n"
+        
+        for i, review in enumerate(reviews[:20], 1):
+            stars = review.get("stars", 0)
+            author = review.get("author", "Покупатель")
+            review_text = review.get("text", "")
+            order_id = review.get("order_id", "")
+            
+            short_id = order_id.replace("-", "").upper()[-8:] if order_id else "?"
+            
+            text += f"{i}. {'⭐' * stars} от {html.escape(str(author))}\n"
+            if review_text:
+                preview = review_text[:50] + "..." if len(review_text) > 50 else review_text
+                text += f"   💬 {html.escape(preview)}\n"
+            text += f"   📦 #{short_id}\n\n"
+        
+        if len(reviews) > 20:
+            text += f"<i>...и ещё {len(reviews) - 20} отзывов</i>"
+        
+        await message.answer(text, parse_mode="HTML")
+        
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {str(e)}")
 
 @dp.message(Command("restart"))
 async def cmd_restart(message: Message):
@@ -890,6 +1065,7 @@ async def handle_notifications(callback: CallbackQuery):
     new_order = notifications.get("new_order", True)
     new_message = notifications.get("new_message", True)
     bot_start = notifications.get("bot_start", True)
+    new_review = notifications.get("new_review", True)
     
     text = "🔔 Уведомления\n\nВыберите, о каких событиях вы хотите получать уведомления:"
     
@@ -911,6 +1087,12 @@ async def handle_notifications(callback: CallbackQuery):
                 InlineKeyboardButton(
                     text=f"{'🟢' if bot_start else '🔴'} Запуск бота",
                     callback_data="toggle_notification_bot_start"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"{'🟢' if new_review else '🔴'} Новые отзывы",
+                    callback_data="toggle_notification_new_review"
                 )
             ],
             [InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")]
@@ -958,6 +1140,134 @@ async def toggle_notification_bot_start(callback: CallbackQuery):
     await callback.answer(f"{'Включено' if not current else 'Выключено'}")
     await handle_notifications(callback)
 
+@dp.callback_query(F.data == "toggle_notification_new_review")
+async def toggle_notification_new_review(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    settings = load_settings()
+    notifications = settings.get("notifications", {})
+    current = notifications.get("new_review", True)
+    notifications["new_review"] = not current
+    settings["notifications"] = notifications
+    save_settings(settings)
+    
+    await callback.answer(f"{'Включено' if not current else 'Выключено'}")
+    await handle_notifications(callback)
+
+
+@dp.callback_query(F.data == "plugins")
+async def handle_plugins(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    await callback.answer()
+    
+    plugins = plugin_manager.get_all_plugins()
+    
+    if not plugins:
+        text = "🧩 Плагины\n\nПлагины не найдены."
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")]]
+        )
+    else:
+        text = "🧩 Плагины\n\nВыберите плагин для управления:"
+        keyboard_buttons = []
+        
+        for uuid, plugin_data in sorted(plugins.items(), key=lambda x: x[1].name.lower()):
+            status = "🟢" if plugin_data.enabled else "🔴"
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text=f"{status} {plugin_data.name}",
+                    callback_data=f"plugin_info:{uuid}"
+                )
+            ])
+        
+        keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith("plugin_info:"))
+async def handle_plugin_info(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    uuid = callback.data.split(":")[1]
+    plugin_data = plugin_manager.get_plugin(uuid)
+    
+    if not plugin_data:
+        await callback.answer("Плагин не найден", show_alert=True)
+        return
+    
+    await callback.answer()
+    
+    status = "🟢 Включен" if plugin_data.enabled else "🔴 Выключен"
+    text = f"🧩 <b>{plugin_data.name}</b>\n\n"
+    text += f"<b>Версия:</b> {plugin_data.version}\n"
+    text += f"<b>Статус:</b> {status}\n"
+    text += f"<b>Описание:</b> {plugin_data.description}\n"
+    text += f"<b>Автор:</b> {plugin_data.credits}\n"
+    
+    keyboard_buttons = [
+        [InlineKeyboardButton(
+            text=f"{'🔴 Выключить' if plugin_data.enabled else '🟢 Включить'}",
+            callback_data=f"plugin_toggle:{uuid}"
+        )]
+    ]
+    
+    if plugin_data.settings_page:
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text="⚙️ Настройки",
+                callback_data=f"plugin_settings:{uuid}"
+            )
+        ])
+    
+    keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="plugins")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("plugin_toggle:"))
+async def handle_plugin_toggle(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    uuid = callback.data.split(":")[1]
+    success = plugin_manager.toggle_plugin(uuid)
+    
+    if not success:
+        await callback.answer("Ошибка при переключении плагина", show_alert=True)
+        return
+    
+    plugin_data = plugin_manager.get_plugin(uuid)
+    await callback.answer(f"{'Включен' if plugin_data.enabled else 'Выключен'}")
+    await handle_plugin_info(callback)
+
+@dp.callback_query(F.data.startswith("plugin_settings:"))
+async def handle_plugin_settings(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    uuid = callback.data.split(":")[1]
+    plugin_data = plugin_manager.get_plugin(uuid)
+    
+    if not plugin_data or not plugin_data.settings_page:
+        await callback.answer("Настройки недоступны", show_alert=True)
+        return
+    
+    await callback.answer("Настройки плагина должны быть реализованы в самом плагине")
 
 @dp.callback_query(F.data == "auto_reply")
 async def handle_auto_reply(callback: CallbackQuery, state: FSMContext):
@@ -1371,7 +1681,6 @@ async def handle_welcome(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
-
 @dp.callback_query(F.data == "toggle_welcome_message")
 async def toggle_welcome_message(callback: CallbackQuery, state: FSMContext):
     if not is_authorized(callback.from_user.id):
@@ -1393,187 +1702,6 @@ async def edit_welcome_message(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Введите текст приветственного сообщения:")
     await state.set_state(SetupStates.setting_welcome_message)
 
-@dp.callback_query(F.data == "plugins")
-async def handle_plugins(callback: CallbackQuery):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-    
-    await callback.answer()
-    
-    plugins = plugin_manager.get_all_plugins()
-    
-    if not plugins:
-        text = "🧩 Плагины\n\nПлагины не найдены."
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="🧩 Добавить плагин", callback_data="add_plugin")]
-                [InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")]
-            ]
-        )
-    else:
-        text = "🧩 Плагины\n\nВыберите плагин для управления:"
-        keyboard_buttons = []
-        for uuid, plugin_data in plugins.items():
-            status = "🟢" if plugin_data.enabled else "🔴"
-            keyboard_buttons.append([
-                InlineKeyboardButton(
-                    text=f"{status} {plugin_data.name} v{plugin_data.version}",
-                    callback_data=f"plugin_{uuid}"
-                )
-            ])
-        keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")])
-        keyboard_buttons.append([InlineKeyboardButton(text="🧩 Добавить плагин", callback_data="add_plugin")])
-        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard)
-    except Exception:
-        await callback.message.answer(text, reply_markup=keyboard)
-
-@dp.callback_query(F.data == "add_plugin")
-async def add_plugin_from_file(callback: CallbackQuery, state: FSMContext):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-
-    text = "🧩 Скиньте сюда файл с расширением .py. Не рекомендуем закидывать не проверенные плагины и те которые слиты. Мало ли что в них."
-
-    try:
-        await callback.message.edit_text(text)
-        await state.set_state(SetupStates.waiting_for_plugins)
-    except Exception:
-        await callback.message.answer(text)
-        await state.set_state(SetupStates.waiting_for_plugins)
-
-@dp.message(SetupStates.waiting_for_plugins, F.document)
-async def save_plugin_file(message: Message, state: FSMContext, bot: Bot):
-    document = message.document
-    file_name = document.file_name
-
-    if not file_name.endswith(".py"):
-        await message.answer("❌ Это не Python файл. Пришлите файл с расширением .py")
-        return
-
-    folder_path = "plugins"
-    os.makedirs(folder_path, exist_ok=True)
-
-    destination = os.path.join(folder_path, file_name)
-
-    await bot.download(document, destination=destination)
-
-    text = f"✅ Файл `{file_name}` успешно сохранен в папку! Пропишите - /restart - чтобы сохранить изменения."
-
-    try:
-        await message.edit_text(text)
-        await state.clear()
-    except Exception:
-        await message.answer(text)
-        await state.clear()
-
-@dp.message(SetupStates.waiting_for_plugins)
-async def incorrect_content(message: Message):
-    await message.edit_text("Я жду именно **файл**. Пожалуйста, прикрепите файл.")
-
-@dp.callback_query(F.data.startswith("plugin_") & ~F.data.startswith("plugin_commands_") & ~F.data.startswith("plugin_settings_"))
-async def handle_plugin_detail(callback: CallbackQuery):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-    
-    uuid = callback.data.replace("plugin_", "")
-    plugin_data = plugin_manager.get_plugin(uuid)
-    
-    if not plugin_data:
-        await callback.answer("Плагин не найден", show_alert=True)
-        return
-    
-    status = "🟢 Активирован" if plugin_data.enabled else "🔴 Деактивирован"
-    text = f"""🧩 <b>{plugin_data.name}</b> v{plugin_data.version}
-
-{plugin_data.description}
-
-<b>Автор:</b> {plugin_data.credits}
-<b>UUID:</b> <code>{plugin_data.uuid}</code>
-<b>Статус:</b> {status}"""
-    
-    keyboard_buttons = [
-        [InlineKeyboardButton(
-            text="🔄 Включить" if not plugin_data.enabled else "🛑 Выключить",
-            callback_data=f"toggle_plugin_{uuid}"
-        )]
-    ]
-    
-    keyboard_buttons.append([
-        InlineKeyboardButton(text="⌨️ Команды", callback_data=f"plugin_commands_{uuid}")
-    ])
-    
-    if plugin_data.settings_page:
-        keyboard_buttons.append([
-            InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"plugin_settings_{uuid}")
-        ])
-    
-    keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="plugins")])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
-    
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("toggle_plugin_"))
-async def handle_toggle_plugin(callback: CallbackQuery):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-    
-    uuid = callback.data.replace("toggle_plugin_", "")
-    
-    if plugin_manager.toggle_plugin(uuid):
-        await callback.answer("✅ Плагин переключен")
-        callback.data = f"plugin_{uuid}"
-        await handle_plugin_detail(callback)
-    else:
-        await callback.answer("❌ Ошибка", show_alert=True)
-
-
-@dp.callback_query(F.data.startswith("plugin_commands_"))
-async def handle_plugin_commands(callback: CallbackQuery):
-    if not is_authorized(callback.from_user.id):
-        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
-        return
-    
-    uuid = callback.data.replace("plugin_commands_", "")
-    plugin_data = plugin_manager.get_plugin(uuid)
-    
-    if not plugin_data:
-        await callback.answer("Плагин не найден", show_alert=True)
-        return
-    
-    await callback.answer()
-    
-    if not plugin_data.commands:
-        text = f"<b>Команды плагина <i>{plugin_data.name}</i>.</b>\n\n❌ У плагина нет команд."
-    else:
-        commands_text_list = []
-        for cmd, desc in plugin_data.commands.items():
-            commands_text_list.append(f"/{cmd} - {desc}")
-        
-        commands_text = "\n\n".join(commands_text_list)
-        text = f"<b>Команды плагина <i>{plugin_data.name}</i>.</b>\n\n{commands_text}"
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀ Назад", callback_data=f"plugin_{uuid}")]
-    ])
-    
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 @dp.message(SetupStates.replying_to_chat)
 async def process_reply_to_chat(message: Message, state: FSMContext):
@@ -1619,6 +1747,87 @@ async def process_welcome_message(message: Message, state: FSMContext):
         update_setting("welcome_message", "enabled", True)
     
     await message.answer("✅ Приветственное сообщение сохранено и включено")
+    await state.clear()
+
+
+class AutoReviewReplyStates(StatesGroup):
+    setting_message = State()
+
+
+@dp.callback_query(F.data == "auto_review_reply")
+async def handle_auto_review_reply(callback: CallbackQuery, state: FSMContext):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    await callback.answer()
+    
+    settings = load_settings()
+    auto_review = settings.get("auto_review_reply", {})
+    enabled = auto_review.get("enabled", False)
+    message = auto_review.get("message", "Спасибо за отзыв!")
+    
+    status_text = "🟢 Авто-ответ на отзыв" if enabled else "🔴 Авто-ответ на отзыв"
+    text = f"⭐ <b>Авто-ответ на отзыв</b>\n\n{status_text}\n\nАвтоматически отправляет сообщение в чат когда покупатель оставляет отзыв."
+    if message:
+        import html as html_escape
+        safe_message = html_escape.escape(message)
+        text += f"\n\n<b>Текущее сообщение:</b>\n<code>{safe_message}</code>"
+    
+    keyboard_buttons = [
+        [InlineKeyboardButton(
+            text=status_text,
+            callback_data="toggle_auto_review_reply"
+        )]
+    ]
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="✏️ Изменить текст", callback_data="edit_auto_review_reply")
+    ])
+    
+    keyboard_buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data="back_to_menu")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.callback_query(F.data == "toggle_auto_review_reply")
+async def toggle_auto_review_reply(callback: CallbackQuery, state: FSMContext):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    current = get_setting("auto_review_reply", "enabled", False)
+    update_setting("auto_review_reply", "enabled", not current)
+    await callback.answer()
+    await handle_auto_review_reply(callback, state)
+
+
+@dp.callback_query(F.data == "edit_auto_review_reply")
+async def edit_auto_review_reply(callback: CallbackQuery, state: FSMContext):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    await callback.answer()
+    await callback.message.answer("Введите текст авто-ответа на отзыв:")
+    await state.set_state(AutoReviewReplyStates.setting_message)
+
+
+@dp.message(AutoReviewReplyStates.setting_message)
+async def process_auto_review_reply_message(message: Message, state: FSMContext):
+    text = message.text.strip()
+    if not text:
+        await message.answer("Текст не может быть пустым. Введите текст авто-ответа:")
+        return
+    
+    update_setting("auto_review_reply", "message", text)
+    if not get_setting("auto_review_reply", "enabled", False):
+        update_setting("auto_review_reply", "enabled", True)
+    
+    await message.answer("✅ Авто-ответ на отзыв сохранен и включен")
     await state.clear()
 
 
@@ -1845,27 +2054,6 @@ async def send_new_message_notification(user_id: int, chat_id: str, message_text
     except Exception:
         pass
 
-async def send_moder_notification(user_id: int, chat_id: str, moder_username: str, chat_title: str):
-    global bot
-    if not is_authorized(user_id) or not bot:
-        return
-
-    text = (
-        f"👮‍♂️ <b>ВНИМАНИЕ: МОДЕРАТОР В ЧАТЕ!</b>\n\n"
-        f"Обнаружено присутствие администрации.\n"
-        f"👤 <b>Модератор:</b> {html.escape(moder_username)}\n"
-        f"💬 <b>Чат:</b> {html.escape(chat_title)}\n\n"
-        f"⚠️ <i>Рекомендуется вести себя корректно и проверить переписку.</i>"
-    )
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚨 Перейти в чат", url=f"https://starvell.com/chat/{chat_id}")]
-    ])
-
-    try:
-        await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        pass
 
 @dp.callback_query(F.data.startswith("reply_chat_"))
 async def handle_reply_chat(callback: CallbackQuery, state: FSMContext):
@@ -1993,6 +2181,7 @@ async def handle_templates_order(callback: CallbackQuery):
         await callback.message.answer("Выберите заготовку:", reply_markup=keyboard)
 
 
+
 @dp.callback_query(F.data.startswith("send_template_"))
 async def handle_send_template(callback: CallbackQuery):
     if not is_authorized(callback.from_user.id):
@@ -2037,13 +2226,147 @@ async def handle_send_template(callback: CallbackQuery):
         await callback.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
 
 
+@dp.callback_query(F.data.startswith("rr_"))
+async def handle_reply_review(callback: CallbackQuery, state: FSMContext):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    chat_id = callback.data[3:]
+    
+    if not chat_id or chat_id == "None":
+        await callback.answer("❌ Не удалось найти чат для этого заказа", show_alert=True)
+        return
+    
+    await callback.answer()
+    await callback.message.answer("Введите текст ответа:")
+    await state.set_state(SetupStates.replying_to_chat)
+    await state.update_data(chat_id=chat_id)
+
+
+@dp.callback_query(F.data.startswith("tr_"))
+async def handle_templates_review(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    chat_id = callback.data[3:]
+    
+    if not chat_id or chat_id == "None":
+        await callback.answer("❌ Не удалось найти чат для этого заказа", show_alert=True)
+        return
+    
+    await callback.answer()
+    
+    templates = get_templates()
+    if not templates:
+        await callback.answer("Заготовки не найдены", show_alert=True)
+        return
+    
+    keyboard_buttons = []
+    for i, template in enumerate(templates):
+        text_preview = template[:30] + "..." if len(template) > 30 else template
+        keyboard_buttons.append([InlineKeyboardButton(text=f"📄 {text_preview}", callback_data=f"st_{chat_id}_{i}")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    try:
+        await callback.message.edit_text("Выберите заготовку:", reply_markup=keyboard)
+    except Exception:
+        await callback.message.answer("Выберите заготовку:", reply_markup=keyboard)
+
+
+@dp.callback_query(F.data.startswith("st_"))
+async def handle_send_template_review(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("Сначала авторизуйтесь через /start", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    chat_id = parts[1]
+    template_index = int(parts[2])
+    
+    templates = get_templates()
+    if template_index >= len(templates):
+        await callback.answer("Заготовка не найдена", show_alert=True)
+        return
+    
+    template_text = templates[template_index]
+    
+    from StarvellAPI.send_message import send_chat_message
+    
+    session = get_session()
+    if not session:
+        await callback.answer("Session не найден", show_alert=True)
+        return
+    
+    try:
+        await send_chat_message(session, chat_id, template_text, "")
+        await callback.answer("✅ Сообщение отправлено")
+    except Exception as e:
+        await callback.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
+
+
+async def handle_review_notification(session: str, order_id: str, chat_id: str = None):
+    from StarvellAPI.reviews import get_order_review, extract_review_from_order_data
+    from StarvellAPI.send_message import send_chat_message
+    from config import log_info, log_error
+    
+    try:
+        processed_reviews = load_processed_reviews()
+        
+        order_data = await get_order_review(session, order_id)
+        review_info = extract_review_from_order_data(order_data)
+        
+        if not review_info:
+            return
+        
+        review_id = review_info.get("review_id")
+        if not review_id:
+            return
+        
+        stars = review_info.get("stars")
+        if not isinstance(stars, int) or stars < 1 or stars > 5:
+            return
+        
+        review_key = f"{order_id}_{review_id}"
+        if review_key in processed_reviews:
+            return
+        
+        processed_reviews.add(review_key)
+        save_processed_reviews(processed_reviews)
+        
+        log_info(f"⭐ Новый отзыв: {stars} звезд, автор: {review_info.get('author', 'Неизвестно')}")
+        
+        review_chat_id = chat_id or review_info.get("chat_id")
+        
+        auto_review_reply_enabled = get_setting("auto_review_reply", "enabled", False)
+        if auto_review_reply_enabled and review_chat_id:
+            auto_reply_message = get_setting("auto_review_reply", "message", "Спасибо за отзыв!")
+            if auto_reply_message:
+                try:
+                    await send_chat_message(session, review_chat_id, auto_reply_message, "")
+                    log_info(f"✅ Авто-ответ на отзыв отправлен")
+                except Exception as e:
+                    log_error(f"Ошибка авто-ответа на отзыв: {e}")
+        
+        review_notification_enabled = get_setting("notifications", "new_review", True)
+        if review_notification_enabled:
+            authorized_users = load_authorized_users()
+            for user_id in authorized_users:
+                try:
+                    await send_review_notification(int(user_id), order_id, review_info, review_chat_id)
+                except Exception as e:
+                    log_error(f"Ошибка отправки уведомления пользователю {user_id}: {e}")
+    except Exception as e:
+        from config import log_error
+        log_error(f"Ошибка обработки уведомления об отзыве: {e}")
+    except Exception as e:
+        from config import log_error
+        log_error(f"Ошибка обработки уведомления об отзыве: {e}")
 
 
 async def check_new_messages():
     from StarvellAPI.chats import fetch_chats
     from StarvellAPI.messages import fetch_chat_messages
-    from StarvellAPI.auth import fetch_homepage_data
-    from datetime import datetime
     
     session = get_session()
     if not session:
@@ -2055,11 +2378,9 @@ async def check_new_messages():
         chats = page_props.get("chats", [])
         
         last_messages = load_last_messages()
-        detected_moders = load_detected_moders()
-        
         new_messages_found = False
-        moders_update_needed = False
         
+        from StarvellAPI.auth import fetch_homepage_data
         homepage_data = await fetch_homepage_data(session)
         user_info = homepage_data.get("user", {}) if homepage_data.get("authorized") else {}
         starvell_user_id = user_info.get("id") if user_info else None
@@ -2079,50 +2400,13 @@ async def check_new_messages():
                     pass
             if last_messages:
                 save_last_messages(last_messages)
-            
             return
-
+        
         for chat in chats:
             chat_id = str(chat.get("id", ""))
             if not chat_id:
                 continue
             
-            if chat_id not in detected_moders:
-                participants = chat.get("participants", [])
-                moder_found = False
-                moder_name = "Неизвестный"
-                
-                for p in participants:
-                    p_id = str(p.get("id"))
-                    if starvell_user_id and p_id == str(starvell_user_id):
-                        continue
-
-                    roles = p.get("roles", [])
-                    is_suspicious = False
-                    
-                    for role in roles:
-                        role_str = str(role).upper()
-                        if any(x in role_str for x in ["MODERATOR"]):
-                            is_suspicious = True
-                            break
-                    
-                    if is_suspicious:
-                        moder_found = True
-                        moder_name = p.get("username", "Скрыт")
-                        break
-                
-                if moder_found:
-                    from config import log_warning
-                    chat_display_name = chat.get("name", chat.get("username", chat_id))
-                    log_warning(f"🚨 ОБНАРУЖЕН МОДЕРАТОР в чате {chat_display_name} (User: {moder_name})")
-                    
-                    authorized_users = load_authorized_users()
-                    for uid in authorized_users:
-                        await send_moder_notification(int(uid), chat_id, moder_name, chat_display_name)
-                    
-                    detected_moders.add(chat_id)
-                    moders_update_needed = True
-
             try:
                 messages = await fetch_chat_messages(session, chat_id, limit=10)
                 if not messages:
@@ -2136,6 +2420,18 @@ async def check_new_messages():
                 last_seen_id = last_messages.get(chat_id, "")
                 
                 if message_id and message_id != last_seen_id:
+                    msg_type = last_message.get("type", "")
+                    metadata = last_message.get("metadata", {}) or {}
+                    notification_type = metadata.get("notificationType", "")
+                    
+                    if msg_type == "NOTIFICATION" and notification_type == "REVIEW_CREATED":
+                        order_id = metadata.get("orderId", "")
+                        if order_id:
+                            last_messages[chat_id] = message_id
+                            new_messages_found = True
+                            await handle_review_notification(session, order_id, chat_id)
+                        continue
+                    
                     if await is_bot_message(chat_id, message_id):
                         last_messages[chat_id] = message_id
                         continue
@@ -2177,13 +2473,24 @@ async def check_new_messages():
                     if not is_outgoing:
                         content_lower = content.lower() if content else ""
                         bot_phrases = [
-                            "спасибо за покупку", "напишите ваш telegram-тег", "пример: @username",
-                            "некорректный или несуществующий тег", "отправьте верный telegram-тег",
-                            "тег принят", "отправляю", "готово: отправлено", "не удалось отправить",
-                            "количество:", "подтверди отправку", "привет, это автоответчик",
-                            "напиши \"+\" или \"да\"", "напиши \"-\" или \"отмена\"",
-                            "подтверди отправку:", "пользователь найден",
-                            "установите цену на геймпассе", "после выставления геймпасса"
+                            "спасибо за покупку",
+                            "напишите ваш telegram-тег",
+                            "пример: @username",
+                            "некорректный или несуществующий тег",
+                            "отправьте верный telegram-тег",
+                            "тег принят",
+                            "отправляю",
+                            "готово: отправлено",
+                            "не удалось отправить",
+                            "количество:",
+                            "подтверди отправку",
+                            "привет, это автоответчик",
+                            "напиши \"+\" или \"да\"",
+                            "напиши \"-\" или \"отмена\"",
+                            "подтверди отправку:",
+                            "пользователь найден",
+                            "установите цену на геймпассе",
+                            "после выставления геймпасса"
                         ]
                         if any(phrase in content_lower for phrase in bot_phrases):
                             is_outgoing = True
@@ -2204,27 +2511,39 @@ async def check_new_messages():
                     
                     participants = chat.get("participants", [])
                     sender_name = "Unknown"
+                    starvell_username = user_info.get("username", "Неизвестно") if user_info else "Неизвестно"
                     
-                    if participants:
-                        for participant in participants:
-                            participant_id = participant.get("id")
-                            if starvell_user_id and str(participant_id) == str(starvell_user_id):
-                                continue
-                            username_candidate = participant.get("username") or ""
-                            if username_candidate:
-                                sender_name = username_candidate
-                                break
-                        if sender_name == "Unknown" and participants:
-                            sender_name = participants[0].get("username") or participants[0].get("name", "Unknown")
+                    if is_outgoing:
+                        sender_name = starvell_username
+                    else:
+                        if participants:
+                            for participant in participants:
+                                participant_id = participant.get("id")
+                                if starvell_user_id and str(participant_id) == str(starvell_user_id):
+                                    continue
+                                username_candidate = participant.get("username") or ""
+                                if username_candidate:
+                                    sender_name = username_candidate
+                                    break
+                            if sender_name == "Unknown" and participants:
+                                sender_name = participants[0].get("username") or participants[0].get("name", "Unknown")
                     
                     chat_name = chat.get("name", chat.get("username", ""))
                     if sender_name == "Unknown":
-                        sender_name = chat_name if chat_name else "Unknown"
+                        if chat_name:
+                            sender_name = chat_name
+                        else:
+                            sender_name = "Unknown"
                     
                     log_message(chat_id, message_id, content, str(sender_id), created_at)
+                    
                     from config import log_info
-                    log_info(f"┌── 💬 Входящее сообщение в чате {sender_name}")
-                    log_info(f"└───> {sender_name}: {display_content}")
+                    if is_outgoing:
+                        log_info(f"┌── 📤 Исходящее сообщение в чате {chat_name if chat_name else sender_name}")
+                        log_info(f"└───> {sender_name}: {display_content}")
+                    else:
+                        log_info(f"┌── 💬 Входящее сообщение в чате {sender_name}")
+                        log_info(f"└───> {sender_name}: {display_content}")
                     
                     last_messages[chat_id] = message_id
                     new_messages_found = True
@@ -2246,6 +2565,7 @@ async def check_new_messages():
                             command_data = commands_dict[command]
                             response_text = command_data.get("response", "")
                             if response_text:
+                                from datetime import datetime
                                 date_obj = datetime.now()
                                 date = date_obj.strftime("%d.%m.%Y")
                                 time_ = date_obj.strftime("%H:%M")
@@ -2255,22 +2575,34 @@ async def check_new_messages():
                                 str_date = f"{date_obj.day} {month_name}"
                                 str_full_date = str_date + f" {date_obj.year} года"
                                 
-                                response_text = response_text.replace("$full_date_text", str_full_date) \
-                                                             .replace("$date_text", str_date) \
-                                                             .replace("$date", date) \
-                                                             .replace("$time", time_) \
-                                                             .replace("$full_time", time_full) \
-                                                             .replace("$username", chat_name) \
-                                                             .replace("$message_text", content) \
-                                                             .replace("$chat_id", chat_id) \
-                                                             .replace("$chat_name", chat_name)
+                                response_text = response_text.replace("$full_date_text", str_full_date)
+                                response_text = response_text.replace("$date_text", str_date)
+                                response_text = response_text.replace("$date", date)
+                                response_text = response_text.replace("$time", time_)
+                                response_text = response_text.replace("$full_time", time_full)
+                                response_text = response_text.replace("$username", chat_name)
+                                response_text = response_text.replace("$message_text", content)
+                                response_text = response_text.replace("$chat_id", chat_id)
+                                response_text = response_text.replace("$chat_name", chat_name)
                                 
                                 try:
                                     from StarvellAPI.send_message import send_chat_message
-                                    await send_chat_message(session, chat_id, response_text, chat_name)
+                                    result = await send_chat_message(session, chat_id, response_text, chat_name)
                                     
                                     if command_data.get("telegramNotification", 0) == 1:
-                                        notification_text = command_data.get("notificationText", "") or f"Пользователь {chat_name} ввел команду {command}."
+                                        notification_text = command_data.get("notificationText", "")
+                                        if not notification_text:
+                                            notification_text = f"Пользователь {chat_name} ввел команду {command}."
+                                        else:
+                                            notification_text = notification_text.replace("$full_date_text", str_full_date)
+                                            notification_text = notification_text.replace("$date_text", str_date)
+                                            notification_text = notification_text.replace("$date", date)
+                                            notification_text = notification_text.replace("$time", time_)
+                                            notification_text = notification_text.replace("$full_time", time_full)
+                                            notification_text = notification_text.replace("$username", chat_name)
+                                            notification_text = notification_text.replace("$message_text", content)
+                                            notification_text = notification_text.replace("$chat_id", chat_id)
+                                            notification_text = notification_text.replace("$chat_name", chat_name)
                                         
                                         authorized_users = load_authorized_users()
                                         for user_id in authorized_users:
@@ -2280,53 +2612,29 @@ async def check_new_messages():
                                                 pass
                                 except Exception:
                                     pass
-
+                    
                     if not is_outgoing:
                         welcome_enabled = get_setting("welcome_message", "enabled", False)
                         if welcome_enabled:
                             try:
                                 welcome_msg = get_setting("welcome_message", "message", "")
                                 welcome_sent = load_welcome_sent()
-                                
-                                if chat_id not in welcome_sent:
-                                    should_send_welcome = True
-
+                                if welcome_msg and chat_id not in welcome_sent:
                                     try:
-                                        msg_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                                        if (datetime.now(msg_time.tzinfo) - msg_time).total_seconds() > 600:
-                                            should_send_welcome = False
+                                        from StarvellAPI.send_message import send_chat_message
+                                        await send_chat_message(session, chat_id, welcome_msg, chat_name)
+                                        welcome_sent.add(chat_id)
+                                        save_welcome_sent(welcome_sent)
                                     except Exception:
-                                        pass 
-
-                                    if should_send_welcome and messages:
-                                        for prev_msg in messages:
-                                            prev_sender = (prev_msg.get("sender") or {}).get("id") or (prev_msg.get("author") or {}).get("id")
-                                            if str(prev_sender) == str(starvell_user_id):
-                                                should_send_welcome = False
-                                                welcome_sent.add(chat_id) 
-                                                save_welcome_sent(welcome_sent)
-                                                break
-                                    
-                                    if should_send_welcome:
-                                        try:
-                                            from StarvellAPI.send_message import send_chat_message
-                                            await send_chat_message(session, chat_id, welcome_msg, chat_name)
-                                            welcome_sent.add(chat_id)
-                                            save_welcome_sent(welcome_sent)
-                                            log_info(f"👋 Авто-приветствие отправлено для {chat_name}")
-                                        except Exception:
-                                            pass
+                                        pass
                             except Exception:
                                 pass
-
+            
             except Exception as e:
                 continue
         
         if new_messages_found:
             save_last_messages(last_messages)
-            
-        if moders_update_needed:
-            save_detected_moders(detected_moders)
     
     except Exception as e:
         pass
@@ -2344,7 +2652,7 @@ async def messages_checker():
 async def send_new_order_notification(user_id: int, order_data: dict):
     try:
         offer = order_data.get("offerDetails", {})
-        lot_title = offer.get("descriptions", {}).get("rus", {}).get("briefDescription") or "Сегодня без названия к сожалению..."
+        lot_title = offer.get("title") or offer.get("name") or "Неизвестный лот"
         
         user = order_data.get("user", {})
         buyer_username = user.get("username", "Неизвестно")
@@ -2381,6 +2689,39 @@ async def send_new_order_notification(user_id: int, order_data: dict):
     except Exception as e:
         from config import log_error
         log_error(f"Ошибка отправки уведомления о заказе: {e}")
+
+async def send_review_notification(user_id: int, order_id: str, review_data: dict, chat_id: str = None):
+    try:
+        stars = review_data.get("stars", 0)
+        text_review = review_data.get("text", "")
+        
+        short_order_id = order_id.replace("-", "").upper()
+        if len(short_order_id) >= 8:
+            short_order_id = f"#{short_order_id[-8:]}"
+        else:
+            short_order_id = f"#{short_order_id}"
+        
+        notification_text = f"💙 Вы получили {'⭐️' * stars} за заказ {short_order_id}!"
+        
+        if text_review:
+            notification_text += f"\n\n💬Комментарий:\n{html.escape(str(text_review))}"
+        
+        order_url = f"https://starvell.com/order/{order_id}"
+        
+        keyboard_buttons = [[InlineKeyboardButton(text="Открыть заказ", url=order_url)]]
+        
+        if chat_id and chat_id != "None":
+            keyboard_buttons.append([
+                InlineKeyboardButton(text="Ответить", callback_data=f"rr_{chat_id}"),
+                InlineKeyboardButton(text="Заготовки", callback_data=f"tr_{chat_id}")
+            ])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        await bot.send_message(user_id, notification_text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e:
+        from config import log_error
+        log_error(f"Ошибка отправки уведомления об отзыве: {e}")
 
 
 async def check_new_orders():
@@ -2744,7 +3085,6 @@ async def init_starvell_account(init_message_ids: dict):
             log_info(f"🆔 {Colors.GREEN}Ваш ID:{Colors.RESET} {Colors.CYAN}{starvell_user_id}{Colors.RESET}.")
             log_info(f"💰 {Colors.GREEN}Баланс:{Colors.RESET} {Colors.CYAN}{balance_rub} RUB{Colors.RESET}.")
             log_info(f"🚀 {Colors.GREEN}Удачной торговли!{Colors.RESET}")
-            log_info("")
             
             write_log(f"Starvell аккаунт инициализирован: {username}, баланс: {balance_rub}")
         else:
@@ -2919,6 +3259,8 @@ async def main():
     asyncio.create_task(announcements.announcements_loop(bot))
     
     await dp.start_polling(bot)
+
+
 
 
 if __name__ == "__main__":
