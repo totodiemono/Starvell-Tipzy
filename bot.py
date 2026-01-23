@@ -1,3 +1,5 @@
+import sys
+import os
 import asyncio
 import logging
 import math
@@ -8,6 +10,9 @@ import time
 import html
 from pathlib import Path
 from datetime import datetime
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from StarvellAPI.starvell_websocket import start_websocket, get_websocket, websocket_client
 
 if getattr(sys, 'frozen', False):
     os.chdir(os.path.dirname(sys.executable))
@@ -308,7 +313,7 @@ def load_settings() -> dict:
                 "auto_bump": False,
                 "logging": True,
                 "watermark_enabled": True,
-                "watermark": "[ 𝚂𝚝𝚊𝚛𝚟𝚎𝚕𝚕-𝚃𝚒𝚙𝚣𝚢 ]"
+                "watermark": "[ Starvell-Tipzy ]"
             }
         }
     try:
@@ -547,13 +552,13 @@ async def cmd_start(message: Message, state: FSMContext):
             [
                 InlineKeyboardButton(
                     text=f"🖥️ Сделать такого же бота",
-                    url="https://github.com/totodiemono/Starvell-Tipzy"
+                    url="https://github.com/totodiemono/starvell-tipzy"
                 )
             ],
             [
                 InlineKeyboardButton(
                     text=f"✈️ Телеграм бота",
-                    url="https://t.me/+qeS_88mIElE2YmFi"
+                    url="https://t.me/TipzyStrvl"
                 )
             ]
         ]
@@ -608,7 +613,6 @@ async def cmd_logs(message: Message):
 
 
 def find_review_in_dict(data: dict, path: str = "") -> list:
-    """Рекурсивно ищет все упоминания 'review', 'rating', 'feedback' в словаре"""
     results = []
     if not isinstance(data, dict):
         return results
@@ -800,7 +804,7 @@ async def cmd_update(message: Message):
         await message.answer(
             "ℹ️ Ссылка на GitHub-репозиторий бота не настроена.\n"
             "Укажи GH в файле version.py, например:\n"
-            'GH = "https://github.com/totodiemono/Starvell-Tipzy"'
+            'GH = "https://github.com/totodiemono/starvell-tipzy"'
         )
         return
     
@@ -2119,7 +2123,7 @@ async def handle_reply_order(callback: CallbackQuery, state: FSMContext):
             pass
     
     if not chat_id:
-        await callback.answer("❌ Не удалось найти чат для этого заказа", show_alert=True)
+        await callback.answer("❌ Далбаеб не нашел я чата", show_alert=True)
         return
     
     await callback.answer()
@@ -2271,7 +2275,7 @@ async def handle_templates_review(callback: CallbackQuery):
     try:
         await callback.message.edit_text("Выберите заготовку:", reply_markup=keyboard)
     except Exception:
-        await callback.message.answer("Выберите заготовку:", reply_markup=keyboard)
+        await callback.message.answer("Выберите заготовку:", reply_markup=keyboard) 
 
 
 @dp.callback_query(F.data.startswith("st_"))
@@ -2652,7 +2656,7 @@ async def messages_checker():
 async def send_new_order_notification(user_id: int, order_data: dict):
     try:
         offer = order_data.get("offerDetails", {})
-        lot_title = offer.get("title") or offer.get("name") or "Неизвестный лот"
+        lot_title = offer.get("descriptions", {}).get("rus", {}).get("briefDescription") or "Сегодня без названия к сожалению..."
         
         user = order_data.get("user", {})
         buyer_username = user.get("username", "Неизвестно")
@@ -3045,14 +3049,14 @@ async def init_starvell_account(init_message_ids: dict):
             except Exception as e:
                 write_log(f"Ошибка создания записей в БД: {str(e)}")
             
-            text = f"""✅ <b>Starvell Tipzy запущен!</b>
+            text = f"""✅ <b>Starvell-Tipzy запущен!</b>
 
 👑 <b>Профиль:</b> {username}
 💰 <b>Баланс:</b> {balance_rub}₽
 
-💬 <b>Чат Telegram:</b> <a href="https://t.me/+tUk3VYLlo20yZGZi">@TipzyChat</a>
-🧩 <b>Плагины:</b> <a href="https://t.me/+qeS_88mIElE2YmFi">@TipzyPlugin</a>
-👨‍💻 <b>Разработчик:</b> @totodiemono"""
+💬 <b>Чат Telegram:</b> <a href="i">https://t.me/+HinGP7g9eoA2N2Yy</a>
+🧩 <b>Плагины:</b> <a href="">@TipzyStrvl</a>
+👨‍💻 <b>Разработчики:</b> @totodiemono @yusxe"""
             
             starvell_initialized = True
             
@@ -3097,9 +3101,9 @@ async def setup_bot_info(bot_token: str, starvell_username: str) -> None:
     temp_bot = None
     try:
         temp_bot = Bot(token=bot_token)
-        bot_name = f"Tipzy Starvell | {starvell_username}"
+        bot_name = f"Starvell-Tipzy | {starvell_username}"
         await temp_bot.set_my_name(bot_name)
-        bot_description = """🛠️ https://github.com/totodiemono/Starvell-Tipzy 
+        bot_description = """🛠️ none
 👨‍💻 @totodiemono 
 🧩 https://t.me/+qeS_88mIElE2YmFi"""
         await temp_bot.set_my_description(bot_description)
@@ -3119,9 +3123,8 @@ async def main():
     global bot
     
     print(Fore.LIGHTBLUE_EX + LOGO + Style.RESET_ALL)
-    print("By totodiemono")
-    print(" * Telegram: t.me/totodiemono")
-    print(" * Плагины: t.me/tipzyfree")
+    print(" * Telegram: @TipzyStrvl")
+    print(" * Плагины: @TipzyStrvl")
     print()
     
     from config import load_main_config, log_info, log_error
@@ -3254,6 +3257,8 @@ async def main():
     asyncio.create_task(orders_checker())
     
     asyncio.create_task(auto_bump_loop())
+
+    asyncio.create_task(start_websocket())
     
     import announcements
     asyncio.create_task(announcements.announcements_loop(bot))
@@ -3261,7 +3266,62 @@ async def main():
     await dp.start_polling(bot)
 
 
+@dp.message(Command("ws"))
+async def cmd_ws(message: Message):
+    if not is_authorized(message.from_user.id):
+        await message.answer("Сначала авторизуйся")
+        return
+    
+    client = get_websocket()
+    
+    if not client:
+        await message.answer("❌ WebSocket клиент не создан")
+        return
+    
+    status = "🟢 Подключен" if client.connected else "🔴 Отключен"
+    
+    text = f"""
+🌐 <b>Starvel WebSocket</b>
 
+📡 Статус: {status}
+🔗 URL: wss://starvell.com/socket.io/
+
+👇 Управление:
+"""
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Переподключить", callback_data="ws_reconnect")],
+        [InlineKeyboardButton(text="📊 Проверка", callback_data="ws_check")]
+    ])
+    
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.callback_query(F.data == "ws_reconnect")
+async def handle_ws_reconnect(callback: CallbackQuery):
+    await callback.answer("Переподключаю...")
+    
+    client = get_websocket()
+    if client:
+        await client.disconnect()
+        await asyncio.sleep(1)
+    
+    success = await start_websocket()
+    
+    if success:
+        await callback.message.edit_text("✅ WebSocket переподключен")
+    else:
+        await callback.message.edit_text("❌ Не удалось подключиться")
+
+
+@dp.callback_query(F.data == "ws_check")
+async def handle_ws_check(callback: CallbackQuery):
+    client = get_websocket()
+    
+    if client and client.connected:
+        await callback.answer("✅ WebSocket активен")
+    else:
+        await callback.answer("❌ WebSocket отключен", show_alert=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
